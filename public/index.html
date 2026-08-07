@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sunday Ticket Pick’em</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <button
+        id="menu-toggle"
+        class="menu-toggle"
+        type="button"
+        aria-label="Open menu"
+        aria-expanded="false"
+        hidden
+      >
+        <span></span><span></span><span></span>
+        <b id="review-count" hidden>0</b>
+      </button>
+      <a class="brand" href="#">Sunday Ticket <span>Pick’em</span></a>
+      <nav id="nav"></nav>
+    </header>
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <aside id="drawer" class="drawer" aria-hidden="true">
+      <div class="drawer-brand">Sunday Ticket <span>Pick’em</span></div>
+      <nav class="drawer-nav">
+        <button type="button" data-view="home">Current picks</button>
+        <button type="button" data-view="place-picks">Place picks</button>
+        <button type="button" data-view="history">Pick history</button>
+        <button type="button" data-view="notifications">Notifications</button>
+        <button type="button" data-view="account">Account info</button>
+        <button id="admin-menu-item" type="button" data-view="admin" hidden>
+          Commissioner tools
+        </button>
+      </nav>
+    </aside>
+    <main>
+      <section id="auth" class="auth-shell">
+        <div>
+          <p class="eyebrow">Weekly football pool</p>
+          <h1>Call every game.<br /><em>Own Monday night.</em></h1>
+          <p class="lede">
+            Make your picks, predict Monday’s total, and compete for the full
+            weekly pool.
+          </p>
+        </div>
+        <form id="auth-form" class="panel">
+          <h2 id="auth-title">Welcome back</h2>
+          <label id="name-label" hidden
+            >Display name<input id="display-name" autocomplete="name" /></label
+          ><label
+            >Email<input
+              id="email"
+              type="email"
+              autocomplete="email"
+              required /></label
+          ><label
+            >Password<input
+              id="password"
+              type="password"
+              minlength="10"
+              autocomplete="current-password"
+              required /></label
+          ><button class="primary" type="submit">Continue</button
+          ><button id="auth-toggle" class="link" type="button">
+            Need an account? Register
+          </button>
+          <p id="auth-error" class="error"></p>
+        </form>
+      </section>
+      <section id="dashboard" hidden>
+        <section id="home-view" class="app-view">
+          <div class="hero">
+            <p class="eyebrow">Your weekly board</p>
+            <h1>Make the call.</h1>
+            <p>See the current pool and the latest unlocked community picks.</p>
+          </div>
+          <section id="community-board" class="community-board">
+            <div id="pool-card" class="pool-card"></div>
+            <div class="board-heading">
+              <div>
+                <p class="eyebrow">Community picks</p>
+                <h2 id="board-title">Weekly picks</h2>
+              </div>
+              <p id="board-status" class="meta"></p>
+            </div>
+            <div id="board-legend" class="board-legend">
+              <span><i class="legend-swatch correct"></i> Correct pick</span>
+              <span
+                ><i class="legend-swatch incorrect"></i> Incorrect pick</span
+              >
+              <span><i class="legend-swatch pending"></i> Game pending</span>
+            </div>
+            <div id="picks-board" class="picks-board"></div>
+          </section>
+        </section>
+        <section id="place-picks-view" class="app-view page-view" hidden>
+          <div class="page-heading">
+            <p class="eyebrow">Weekly entry</p>
+            <h1>Place picks</h1>
+            <p>Choose a week to make or review your selections.</p>
+          </div>
+          <div id="weeks" class="week-grid"></div>
+        </section>
+        <section id="history-view" class="app-view page-view" hidden>
+          <div class="page-heading">
+            <p class="eyebrow">Your entries</p>
+            <h1>Pick history</h1>
+            <p>Review every week you entered and how you finished.</p>
+          </div>
+          <div id="history-list" class="history-list"></div>
+        </section>
+        <section id="account-view" class="app-view page-view" hidden>
+          <div class="page-heading">
+            <p class="eyebrow">Profile</p>
+            <h1>Account info</h1>
+          </div>
+          <div id="account-card" class="panel account-card"></div>
+        </section>
+        <section id="notifications-view" class="app-view page-view" hidden>
+          <div class="page-heading">
+            <p class="eyebrow">Updates</p>
+            <h1>Notifications</h1>
+            <p>Approval decisions and other entry updates.</p>
+          </div>
+          <div id="notifications-list" class="notifications-list"></div>
+        </section>
+        <section id="week-detail" hidden>
+          <button id="back" class="link">← All weeks</button>
+          <div id="week-heading"></div>
+          <div id="entry-controls" class="entry-controls"></div>
+          <form id="picks-form">
+            <div id="games"></div>
+            <div class="ticket">
+              <p id="pick-progress" class="pick-progress">0 of 0 selected</p>
+              <label
+                >Tiebreaker game combined score<input
+                  id="tiebreaker"
+                  type="number"
+                  min="0"
+                  max="200"
+                  required /></label
+              ><button class="primary" type="submit">Save picks</button
+              ><button id="checkout" class="gold" type="button" hidden>
+                Submit picks for review
+              </button>
+              <p id="pick-message"></p>
+            </div>
+          </form>
+          <div id="leaderboard"></div>
+        </section>
+        <section id="admin" class="app-view admin" hidden>
+          <div class="section-title">
+            <p class="eyebrow">Commissioner tools</p>
+            <h2>Build the board</h2>
+          </div>
+          <section class="review-panel panel">
+            <div>
+              <h3>Pick review queue</h3>
+              <p class="meta">
+                Approve completed entries before they appear on the public picks
+                board.
+              </p>
+            </div>
+            <div id="pick-review-list"></div>
+          </section>
+          <form id="schedule-import-form" class="panel import-panel">
+            <div>
+              <h3>Import a full schedule</h3>
+              <p class="meta">
+                Imports all 32 teams and the regular season. Re-import later to
+                update kickoff changes without duplicates.
+              </p>
+            </div>
+            <label
+              >Season<input
+                name="season"
+                type="number"
+                value="2026"
+                min="2020"
+                max="2100"
+                required
+            /></label>
+            <button type="submit">Import from nflverse</button>
+            <label class="upload"
+              >Or upload games.csv<input
+                id="schedule-file"
+                type="file"
+                accept=".csv,text/csv"
+            /></label>
+          </form>
+          <div class="admin-grid">
+            <form id="team-form" class="panel">
+              <h3>Add team</h3>
+              <input
+                name="abbreviation"
+                placeholder="BUF"
+                maxlength="5"
+                required
+              /><input name="city" placeholder="Buffalo" required /><input
+                name="name"
+                placeholder="Bills"
+                required
+              /><input
+                name="logoUrl"
+                placeholder="Logo URL (optional)"
+              /><button>Add team</button>
+            </form>
+            <form id="season-form" class="panel">
+              <h3>Add season</h3>
+              <input
+                name="year"
+                type="number"
+                placeholder="2026"
+                required
+              /><input
+                name="name"
+                placeholder="2026 Regular Season"
+                required
+              /><button>Add season</button>
+            </form>
+            <form id="week-form" class="panel">
+              <h3>Add week</h3>
+              <input
+                name="seasonId"
+                type="number"
+                placeholder="Season ID"
+                required
+              /><input
+                name="weekNumber"
+                type="number"
+                placeholder="Week number"
+                required
+              /><input name="name" placeholder="Week 1" required /><label
+                >Locks at<input
+                  name="picksLockAt"
+                  type="datetime-local"
+                  required /></label
+              ><button>Open week</button>
+            </form>
+            <form id="game-form" class="panel">
+              <h3>Add game</h3>
+              <input
+                name="weekId"
+                type="number"
+                placeholder="Week ID"
+                required
+              /><select name="awayTeamId" required>
+                <option value="">Away team</option></select
+              ><select name="homeTeamId" required>
+                <option value="">Home team</option></select
+              ><label
+                >Kickoff<input
+                  name="kickoffAt"
+                  type="datetime-local"
+                  required /></label
+              ><label class="check"
+                ><input name="isMondayTiebreaker" type="checkbox" /> Monday
+                tiebreaker</label
+              ><button>Add game</button>
+            </form>
+            <form id="result-form" class="panel">
+              <h3>Post result</h3>
+              <input
+                name="gameId"
+                type="number"
+                placeholder="Game ID"
+                required
+              /><input
+                name="awayScore"
+                type="number"
+                min="0"
+                placeholder="Away score"
+                required
+              /><input
+                name="homeScore"
+                type="number"
+                min="0"
+                placeholder="Home score"
+                required
+              /><button>Mark final</button>
+            </form>
+            <form id="score-form" class="panel">
+              <h3>Finalize week</h3>
+              <input
+                name="weekId"
+                type="number"
+                placeholder="Week ID"
+                required
+              /><button>Score & calculate pool</button>
+            </form>
+          </div>
+          <p id="admin-message"></p>
+        </section>
+        <nav id="mobile-nav" class="mobile-nav" aria-label="Primary navigation">
+          <button type="button" data-view="home"><span>◫</span>Current</button>
+          <button type="button" data-view="place-picks">
+            <span>✓</span>Pick
+          </button>
+          <button type="button" data-view="history">
+            <span>↶</span>History
+          </button>
+          <button type="button" data-view="account">
+            <span>○</span>Account
+          </button>
+        </nav>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

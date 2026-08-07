@@ -1,0 +1,14 @@
+ALTER TABLE teams ADD COLUMN logo_url VARCHAR(500) NULL AFTER name;
+ALTER TABLE games ADD COLUMN external_id VARCHAR(100) NULL AFTER id;
+ALTER TABLE games ADD UNIQUE KEY games_external_id_unique (external_id);
+
+CREATE TABLE IF NOT EXISTS schedule_imports (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  season_year SMALLINT UNSIGNED NOT NULL,
+  source VARCHAR(100) NOT NULL,
+  games_seen SMALLINT UNSIGNED NOT NULL,
+  imported_by BIGINT UNSIGNED NOT NULL,
+  imported_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  CONSTRAINT schedule_imports_user_fk FOREIGN KEY (imported_by) REFERENCES users(id)
+) ENGINE=InnoDB;

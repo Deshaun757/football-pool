@@ -1,0 +1,22 @@
+name: fantasy-football
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: pickem
+      MYSQL_USER: pickem
+      MYSQL_PASSWORD: pickem
+      MYSQL_ROOT_PASSWORD: local-root-only
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  mysql-data:
