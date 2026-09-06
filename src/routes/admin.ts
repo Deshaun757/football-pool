@@ -5,10 +5,11 @@ import { pool } from "../db/pool.js";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import { scoreWeek } from "../services/score-week.js";
 import { importScheduleCsv } from "../services/import-schedule.js";
+import { fetchScheduleCsv } from "../services/fetch-schedule.js";
 import { HttpError } from "../lib/http-error.js";
 
 export const adminRouter = Router();
-adminRouter.use(requireAuth, requireAdmin);
+adminRouter.use('/admin', requireAuth, requireAdmin);
 
 adminRouter.get("/admin/teams", async (_request, response) => {
   const [rows] = await pool.query(
@@ -17,95 +18,6 @@ adminRouter.get("/admin/teams", async (_request, response) => {
   response.json(rows);
 });
 
-adminRouter.get("/admin/pick-reviews", async (_request, response) => {
-  const [rows] = await pool.query(
-    `SELECT e.id AS entryId, e.entry_number AS entryNumber, u.display_name AS displayName, u.email, w.name AS weekName,
-      e.tiebreaker_total AS tiebreakerTotal, e.submitted_at AS submittedAt,
-      COUNT(p.game_id) AS pickCount
-     FROM entries e JOIN users u ON u.id=e.user_id JOIN weeks w ON w.id=e.week_id
-     LEFT JOIN picks p ON p.entry_id=e.id WHERE e.status='pending_review'
-     GROUP BY e.id,e.entry_number,u.display_name,u.email,w.name,e.tiebreaker_total,e.submitted_at
-     ORDER BY e.submitted_at ASC`,
-  );
-  response.json(rows);
-});
-adminRouter.post(
-  "/admin/pick-reviews/:entryId/approve",
-  async (request, response) => {
-    const entryId = z.coerce
-      .number()
-      .int()
-      .positive()
-      .parse(request.params.entryId);
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [result] = await connection.execute<ResultSetHeader>(
-        "UPDATE entries SET status='submitted' WHERE id=? AND status='pending_review'",
-        [entryId],
-      );
-      if (!result.affectedRows)
-        throw new HttpError(409, "Entry is no longer pending review");
-      await connection.execute(
-        "UPDATE notifications SET read_at=UTC_TIMESTAMP(3) WHERE entry_id=? AND type='pick_review_requested'",
-        [entryId],
-      );
-      await connection.execute(
-        `INSERT INTO notifications (user_id,entry_id,type,message)
-       SELECT user_id,id,'entry_approved','Your picks were approved' FROM entries WHERE id=?
-       ON DUPLICATE KEY UPDATE message=VALUES(message),read_at=NULL,created_at=CURRENT_TIMESTAMP(3)`,
-        [entryId],
-      );
-      await connection.commit();
-      response.json({ entryId, status: "submitted" });
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  },
-);
-adminRouter.post(
-  "/admin/pick-reviews/:entryId/reject",
-  async (request, response) => {
-    const entryId = z.coerce
-      .number()
-      .int()
-      .positive()
-      .parse(request.params.entryId);
-    const body = z
-      .object({ reason: z.string().trim().min(3).max(300) })
-      .parse(request.body);
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [result] = await connection.execute<ResultSetHeader>(
-        "UPDATE entries SET status='rejected' WHERE id=? AND status='pending_review'",
-        [entryId],
-      );
-      if (!result.affectedRows)
-        throw new HttpError(409, "Entry is no longer pending review");
-      await connection.execute(
-        "UPDATE notifications SET read_at=UTC_TIMESTAMP(3) WHERE entry_id=? AND type='pick_review_requested'",
-        [entryId],
-      );
-      await connection.execute(
-        `INSERT INTO notifications (user_id,entry_id,type,message)
-       SELECT user_id,id,'entry_rejected',? FROM entries WHERE id=?
-       ON DUPLICATE KEY UPDATE message=VALUES(message),read_at=NULL,created_at=CURRENT_TIMESTAMP(3)`,
-        [`Picks need changes: ${body.reason}`, entryId],
-      );
-      await connection.commit();
-      response.json({ entryId, status: "rejected" });
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  },
-);
 adminRouter.post("/admin/teams", async (request, response) => {
   const body = z
     .object({
@@ -209,37 +121,12 @@ adminRouter.post("/admin/weeks/:weekId/score", async (request, response) => {
     .parse(request.params.weekId);
   response.json(await scoreWeek(weekId));
 });
-adminRouter.get("/admin/weeks/:weekId/pool", async (request, response) => {
-  const weekId = z.coerce
-    .number()
-    .int()
-    .positive()
-    .parse(request.params.weekId);
-  const [rows] = await pool.query(
-    `SELECT COUNT(*) AS paidEntries, COALESCE(SUM(p.gross_amount_cents),0) AS grossCents,
-      COALESCE(SUM(p.processor_fee_cents),0) AS feeCents,
-      COALESCE(SUM(COALESCE(p.net_amount_cents,p.gross_amount_cents)),0) AS prizePoolCents
-     FROM payments p JOIN entries e ON e.id=p.entry_id WHERE e.week_id=? AND p.status='paid'`,
-    [weekId],
-  );
-  response.json((rows as object[])[0]);
-});
-
 const importSchema = z.object({ season: z.number().int().min(2020).max(2100) });
 adminRouter.post(
   "/admin/schedules/import-nflverse",
   async (request, response) => {
     const { season } = importSchema.parse(request.body);
-    const sourceUrl =
-      "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv";
-    const sourceResponse = await fetch(sourceUrl, {
-      signal: AbortSignal.timeout(20_000),
-    });
-    if (!sourceResponse.ok)
-      throw new Error(`Schedule source returned ${sourceResponse.status}`);
-    const csv = await sourceResponse.text();
-    if (csv.length > 5_000_000)
-      throw new Error("Schedule source exceeded the expected size");
+    const csv = await fetchScheduleCsv();
     response.json(
       await importScheduleCsv(
         csv,

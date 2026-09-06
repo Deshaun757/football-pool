@@ -3,7 +3,10 @@ let me = null,
   registerMode = false,
   currentWeek = null;
 let boardRefreshTimer = null;
-let paymentsEnabled = false;
+let activeGroup = null;
+let groups = [];
+const needsPickReview = () => !!activeGroup?.requirePickApproval && activeGroup?.role !== 'commissioner';
+const canReview = () => !!activeGroup && (activeGroup.role === 'commissioner' || me?.role === 'admin');
 let weeksData = [];
 let myEntriesData = [];
 let activeView = "home";
@@ -18,6 +21,10 @@ const esc = (value) =>
   );
 
 async function api(path, options = {}) {
+  if (/^\/api\/(weeks|entries|my-entries|picks-board|reviews|notifications)(\/|$)/.test(path)) {
+    if (!activeGroup) throw new Error('Choose or join a group first');
+    path = '/api/groups/' + activeGroup.id + path.slice(4);
+  }
   const response = await fetch(path, {
     ...options,
     headers: { "content-type": "application/json", ...(options.headers || {}) },
@@ -27,10 +34,6 @@ async function api(path, options = {}) {
   if (!response.ok) throw new Error(data.error || "Something went wrong");
   return data;
 }
-const money = (cents) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
-    (cents || 0) / 100,
-  );
 const date = (value) =>
   new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -68,9 +71,11 @@ const easternTime = (value) =>
 async function boot() {
   try {
     me = await api("/api/auth/me");
-    showDashboard();
-  } catch {
+    if (me) await showDashboard();
+    else $("#auth").hidden = false;
+  } catch (error) {
     $("#auth").hidden = false;
+    $("#auth-error").textContent = error.message;
   }
 }
 
@@ -94,13 +99,14 @@ $("#auth-form").onsubmit = async (event) => {
       method: "POST",
       body: JSON.stringify(body),
     });
-    showDashboard();
+    await showDashboard();
   } catch (error) {
     $("#auth-error").textContent = error.message;
   }
 };
 
 async function showDashboard() {
+  document.body.classList.add('signed-in');
   $("#auth").hidden = true;
   $("#dashboard").hidden = false;
   $("#nav").innerHTML = `<span>${esc(me.displayName)}</span>`;
@@ -108,33 +114,39 @@ async function showDashboard() {
   $("#admin-menu-item").hidden = me.role !== "admin";
   setupNavigation();
   renderAccount();
-  await Promise.all([loadWeeks(), loadPicksBoard(), loadNotifications()]);
+  await loadGroups();
+  if (activeGroup) await Promise.all([loadWeeks(), loadPicksBoard(), loadNotifications()]);
   if (!boardRefreshTimer)
     boardRefreshTimer = setInterval(() => {
-      loadPicksBoard();
-      loadNotifications();
-      if (me?.role === "admin") loadPickReviews();
+      if (!activeGroup) return;
+      Promise.all([loadPicksBoard(), loadNotifications(), ...(canReview() ? [loadPickReviews()] : [])])
+        .catch(error => { $('#group-message').textContent = error.message; });
     }, 15000);
   if (me.role === "admin") await loadTeams();
-  if (me.role === "admin") await loadPickReviews();
-  showView("home");
+  if (canReview()) await loadPickReviews();
+  showView(activeGroup ? "home" : "groups");
 }
 
 function setupNavigation() {
   const drawer = $("#drawer");
   const backdrop = $("#drawer-backdrop");
   const toggle = $("#menu-toggle");
+  const desktop = window.matchMedia('(min-width: 761px)');
   const closeDrawer = () => {
     drawer.classList.remove("open");
-    drawer.setAttribute("aria-hidden", "true");
+    drawer.setAttribute("aria-hidden", String(!desktop.matches));
+    drawer.inert = !desktop.matches;
     backdrop.hidden = true;
     toggle.setAttribute("aria-expanded", "false");
     document.body.classList.remove("drawer-open");
   };
+  desktop.onchange = closeDrawer;
+  closeDrawer();
   toggle.onclick = () => {
     const opening = !drawer.classList.contains("open");
     drawer.classList.toggle("open", opening);
     drawer.setAttribute("aria-hidden", String(!opening));
+    drawer.inert = !opening;
     backdrop.hidden = !opening;
     toggle.setAttribute("aria-expanded", String(opening));
     document.body.classList.toggle("drawer-open", opening);
@@ -158,6 +170,8 @@ function setupNavigation() {
 
 function showView(view) {
   if (view === "admin" && me.role !== "admin") view = "home";
+  if (view === 'reviews' && !canReview()) view = 'groups';
+  if (!activeGroup && !['groups','account','admin'].includes(view)) view = 'groups';
   activeView = view;
   $("#week-detail").hidden = true;
   document.querySelectorAll(".app-view").forEach((section) => {
@@ -173,13 +187,13 @@ function showView(view) {
     );
   if (view === "history") renderHistory();
   if (view === "notifications") loadNotifications(true);
-  if (view === "admin") loadPickReviews();
+  if (view === "reviews") loadPickReviews().catch(error => { $("#review-message").textContent = error.message; });
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function renderAccount() {
   $("#account-card").innerHTML =
-    `<dl class="account-details"><div><dt>Display name</dt><dd>${esc(me.displayName)}</dd></div><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "Commissioner" : "Player"}</dd></div></dl><button id="account-logout" type="button">Log out</button>`;
+    `<dl class="account-details"><div><dt>Display name</dt><dd>${esc(me.displayName)}</dd></div><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl><button id="account-logout" type="button">Log out</button>`;
   $("#account-logout").onclick = async () => {
     await api("/api/auth/logout", { method: "POST" });
     location.reload();
@@ -189,14 +203,11 @@ function renderAccount() {
 async function loadPicksBoard() {
   try {
     const board = await api("/api/picks-board");
-    paymentsEnabled = board.paymentsEnabled;
     board.games.sort(
       (a, b) => new Date(a.kickoffAt) - new Date(b.kickoffAt) || a.id - b.id,
     );
     const poolWeekName = board.poolWeek?.name ?? "Upcoming week";
-    $("#pool-card").innerHTML = paymentsEnabled
-      ? `<div><p class="eyebrow">${esc(poolWeekName)} money pool</p><h2>${board.pool.paidEntries} paid ${board.pool.paidEntries === 1 ? "entry" : "entries"}</h2><p class="pool-detail">Verified payments; Stripe fees reconcile automatically</p></div><strong class="pool-amount">${money(board.pool.poolCents)}</strong>`
-      : `<div><p class="eyebrow">${esc(poolWeekName)} entries</p><h2>${board.pool.paidEntries} approved ${board.pool.paidEntries === 1 ? "entry" : "entries"}</h2><p class="pool-detail">Picks appear publicly only after commissioner approval and the weekly lock</p></div><strong class="pool-amount">✓</strong>`;
+    $("#pool-card").innerHTML = `<div><p class="eyebrow">${esc(poolWeekName)} entries</p><h2>${board.pool.approvedEntries} approved ${board.pool.approvedEntries === 1 ? "entry" : "entries"}</h2><p class="pool-detail">Picks appear publicly only after commissioner approval and the weekly lock</p></div><strong class="pool-amount">✓</strong>`;
     if (!board.displayWeek) {
       $("#board-title").textContent = "Weekly picks";
       $("#board-status").textContent = board.poolWeek
@@ -326,6 +337,7 @@ async function openWeek(id, entryId = null) {
   });
   $("#week-detail").hidden = false;
   const { week, games, entry } = currentWeek;
+  $("#pick-message").textContent = "";
   games.sort(
     (a, b) => new Date(a.kickoffAt) - new Date(b.kickoffAt) || a.id - b.id,
   );
@@ -337,7 +349,7 @@ async function openWeek(id, entryId = null) {
     (!entry || ["draft", "rejected"].includes(entry.status));
   $(".ticket").classList.toggle("editable-ticket", editable);
   const canAddEntry =
-    week.status === "open" && new Date(week.picksLockAt) > new Date();
+    week.status === "open" && new Date(week.picksLockAt) > new Date() && (activeGroup.allowMultipleEntries || currentWeek.entries.length === 0);
   $("#entry-controls").innerHTML =
     `${currentWeek.entries.map((item) => `<button type="button" class="entry-switch ${entry?.id === item.id ? "active" : ""}" data-entry-id="${item.id}">Entry ${item.entryNumber} · ${esc(item.status)}</button>`).join("")}${canAddEntry ? '<button type="button" id="new-entry" class="entry-switch">+ New entry</button>' : ""}`;
   document
@@ -370,11 +382,9 @@ async function openWeek(id, entryId = null) {
   $("#tiebreaker").value = entry?.tiebreakerTotal ?? "";
   $("#tiebreaker").disabled = !editable;
   $("#picks-form").querySelector("button[type=submit]").hidden = !editable;
-  $("#checkout").hidden =
-    !entry || !["draft", "rejected"].includes(entry.status);
-  $("#checkout").textContent = paymentsEnabled
-    ? "Pay & submit"
-    : "Submit picks for review";
+  $("#submit-review").hidden =
+    !editable || !entry;
+  $("#submit-review").textContent = needsPickReview() ? "Submit picks for review" : "Submit picks";
   await loadLeaderboard(id);
 }
 function updatePickProgress() {
@@ -393,6 +403,10 @@ $("#back").onclick = () => {
   loadWeeks();
   showView(weekReturnView);
 };
+$("#picks-form").addEventListener("input", () => {
+  $("#submit-review").hidden = true;
+  $("#pick-message").textContent = "You have unsaved changes. Save your picks before submitting.";
+});
 $("#picks-form").onsubmit = async (event) => {
   event.preventDefault();
   const picks = currentWeek.games.map((g) => ({
@@ -414,32 +428,23 @@ $("#picks-form").onsubmit = async (event) => {
         tiebreakerTotal: Number($("#tiebreaker").value),
       }),
     });
-    currentWeek.entry = { ...saved, id: saved.id ?? saved.entryId };
-    $("#checkout").hidden = false;
+    await openWeek(currentWeek.week.id, saved.id ?? saved.entryId);
     $("#pick-message").textContent =
-      "Picks saved. Payment will lock and submit them.";
+      needsPickReview() ? "Picks saved. Submit them for commissioner review." : "Picks saved. Submit to lock your entry.";
   } catch (e) {
     $("#pick-message").textContent = e.message;
   }
 };
-$("#checkout").onclick = async () => {
+$("#submit-review").onclick = async () => {
   try {
     const entryId = currentWeek.entry.id ?? currentWeek.entry.entryId;
-    const path = paymentsEnabled
-      ? `/api/entries/${entryId}/checkout`
-      : `/api/entries/${entryId}/submit-review`;
-    const result = await api(path, {
+    const result = await api(`/api/entries/${entryId}/submit-review`, {
       method: "POST",
     });
-    if (paymentsEnabled) location.href = result.checkoutUrl;
-    else {
-      currentWeek.entry.status = result.status;
-      $("#checkout").hidden = true;
-      $("#picks-form").querySelector("button[type=submit]").hidden = true;
-      $("#pick-message").textContent =
-        "Picks submitted. The commissioner has been notified for review.";
-      await loadWeeks();
-    }
+    await openWeek(currentWeek.week.id, entryId);
+    $("#pick-message").textContent =
+      result.status === "submitted" ? "Picks submitted. Your entry is locked in." : "Picks submitted. The commissioner has been notified for review.";
+    await loadWeeks();
   } catch (e) {
     $("#pick-message").textContent = e.message;
   }
@@ -451,6 +456,8 @@ async function loadNotifications(markRead = false) {
   const result = await api("/api/notifications");
   $("#review-count").hidden = result.unreadCount === 0;
   $("#review-count").textContent = result.unreadCount;
+  $('.drawer-nav [data-view="notifications"]').textContent = result.unreadCount
+    ? `Notifications (${result.unreadCount})` : 'Notifications';
   $("#notifications-list").innerHTML = result.notifications.length
     ? result.notifications
         .map(
@@ -469,11 +476,11 @@ async function loadNotifications(markRead = false) {
 }
 
 async function loadPickReviews() {
-  if (me?.role !== "admin") return;
-  const reviews = await api("/api/admin/pick-reviews");
-  $("#admin-menu-item").textContent = reviews.length
-    ? `Commissioner tools (${reviews.length})`
-    : "Commissioner tools";
+  if (!canReview()) return;
+  const reviews = await api("/api/reviews");
+  $("#commissioner-menu-item").textContent = reviews.length
+    ? `Group commissioner (${reviews.length})`
+    : "Group commissioner";
   $("#pick-review-list").innerHTML = reviews.length
     ? reviews
         .map(
@@ -488,7 +495,7 @@ async function loadPickReviews() {
         const entryId = button.closest(".review-item").dataset.entryId;
         button.disabled = true;
         try {
-          await api(`/api/admin/pick-reviews/${entryId}/approve`, {
+          await api(`/api/reviews/${entryId}/approve`, {
             method: "POST",
           });
           await Promise.all([
@@ -497,7 +504,7 @@ async function loadPickReviews() {
             loadNotifications(),
           ]);
         } catch (error) {
-          $("#admin-message").textContent = error.message;
+          $("#review-message").textContent = error.message;
           button.disabled = false;
         }
       }),
@@ -511,13 +518,13 @@ async function loadPickReviews() {
         if (!reason) return;
         const entryId = button.closest(".review-item").dataset.entryId;
         try {
-          await api(`/api/admin/pick-reviews/${entryId}/reject`, {
+          await api(`/api/reviews/${entryId}/reject`, {
             method: "POST",
             body: JSON.stringify({ reason }),
           });
           await Promise.all([loadPickReviews(), loadNotifications()]);
         } catch (error) {
-          $("#admin-message").textContent = error.message;
+          $("#review-message").textContent = error.message;
         }
       }),
   );
@@ -525,7 +532,7 @@ async function loadPickReviews() {
 async function loadLeaderboard(id) {
   const rows = await api(`/api/weeks/${id}/leaderboard`);
   $("#leaderboard").innerHTML = rows.length
-    ? `<h2>Leaderboard</h2><table class="leader-table"><thead><tr><th>Player</th><th>Correct</th><th>Monday diff</th><th>Prize</th></tr></thead><tbody>${rows.map((r, i) => `<tr><td>${i + 1}. ${esc(r.displayName)}</td><td>${r.correctPicks ?? "—"}</td><td>${r.tiebreakerDifference ?? "—"}</td><td>${r.prizeCents != null ? money(r.prizeCents) : "—"}</td></tr>`).join("")}</tbody></table>`
+    ? `<h2>Leaderboard</h2><table class="leader-table"><thead><tr><th>Player</th><th>Correct</th><th>Monday diff</th></tr></thead><tbody>${rows.map((r, i) => `<tr><td>${i + 1}. ${esc(r.displayName)}</td><td>${r.correctPicks ?? "—"}</td><td>${r.tiebreakerDifference ?? "—"}</td></tr>`).join("")}</tbody></table>`
     : "";
 }
 
@@ -635,4 +642,57 @@ wireForm(
   (b) => `/api/admin/weeks/${b.weekId}/score`,
   () => ({}),
 );
+async function loadGroups() {
+  groups = await api('/api/groups');
+  const saved = Number(localStorage.getItem('pickem-group-' + me.id));
+  activeGroup = groups.find(group => group.id === saved) ?? groups[0] ?? null;
+  $('#group-select').innerHTML = groups.length ? groups.map(group => `<option value="${group.id}" ${group.id === activeGroup?.id ? 'selected' : ''}>${esc(group.name)}</option>`).join('') : '<option>No groups yet</option>';
+  $('#group-select').disabled = !groups.length;
+  $('#commissioner-menu-item').hidden = !canReview();
+  for (const name of ['requirePickApproval','allowMultipleEntries','joiningEnabled']) $('#group-settings-form').elements[name].checked = !!activeGroup?.[name];
+  $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
+  document.querySelectorAll('[data-group-id]').forEach(button => button.onclick = () => selectGroup(Number(button.dataset.groupId)));
+  if (activeGroup) {
+    const members = await api('/api/groups/' + activeGroup.id + '/members');
+    $('#group-members').innerHTML = members.map(member => `<p>${esc(member.displayName)} · ${member.role === 'commissioner' ? 'Commissioner' : 'Member'}</p>`).join('');
+  } else $('#group-members').textContent = 'Choose a group to see its members.';
+}
+function selectGroup(id) {
+  localStorage.setItem('pickem-group-' + me.id, String(id));
+  location.reload();
+}
+$('#group-select').onchange = event => selectGroup(Number(event.target.value));
+for (const [id,path] of [['create-group-form','/api/groups'],['join-group-form','/api/groups/join']]) {
+  $('#' + id).onsubmit = async event => {
+    event.preventDefault();
+    const button = event.target.querySelector('button');
+    button.disabled = true;
+    try {
+      const group = await api(path,{method:'POST',body:JSON.stringify(formObject(event.target))});
+      selectGroup(group.id);
+    } catch(error) { $('#group-message').textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+}
+$('#group-settings-form').onsubmit = async event => {
+  event.preventDefault();
+  const button = event.target.querySelector('button[type=submit]');
+  button.disabled = true;
+  try {
+    const settings = Object.fromEntries(['requirePickApproval','allowMultipleEntries','joiningEnabled'].map(name => [name,event.target.elements[name].checked]));
+    await api('/api/groups/' + activeGroup.id + '/settings',{method:'PATCH',body:JSON.stringify(settings)});
+    await loadGroups();
+    $('#settings-message').textContent = 'Group settings saved.';
+  } catch(error) { $('#settings-message').textContent = error.message; }
+  finally { button.disabled = false; }
+};
+$('#rotate-invite').onclick = async event => {
+  event.target.disabled = true;
+  try {
+    await api('/api/groups/' + activeGroup.id + '/invite-code',{method:'POST'});
+    await loadGroups();
+    $('#settings-message').textContent = 'Invite code replaced. Find the new code in My groups.';
+  } catch(error) { $('#settings-message').textContent = error.message; }
+  finally { event.target.disabled = false; }
+};
 boot();

@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "vitest run",
+    "test:groups": "npm run build && node scripts/test-groups.mjs",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed-demo": "tsx src/db/seed-demo.ts"
   },
@@ -19,7 +20,6 @@
     "helmet": "^8.1.0",
     "luxon": "^3.7.2",
     "mysql2": "^3.14.3",
-    "stripe": "^18.4.0",
     "zod": "^4.0.17"
   },
   "devDependencies": {

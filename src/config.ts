@@ -8,13 +8,6 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   APP_URL: z.url().default("http://localhost:3000"),
   MYSQL_URL: z.string().min(1),
-  STRIPE_SECRET_KEY: z.string().min(1),
-  STRIPE_WEBHOOK_SECRET: z.string().min(1),
-  ENTRY_FEE_CENTS: z.coerce.number().int().positive().default(1000),
-  PAYMENTS_ENABLED: z
-    .enum(["true", "false"])
-    .default("false")
-    .transform((value) => value === "true"),
   SESSION_COOKIE_NAME: z.string().min(1).default("pickem_session"),
   SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
   ADMIN_EMAIL: z.string().email().optional(),

@@ -23,16 +23,18 @@
       <nav id="nav"></nav>
     </header>
     <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
-    <aside id="drawer" class="drawer" aria-hidden="true">
+    <aside id="drawer" class="drawer" aria-hidden="true" inert>
       <div class="drawer-brand">Sunday Ticket <span>Pick’em</span></div>
       <nav class="drawer-nav">
+        <button type="button" data-view="groups">My groups</button>
         <button type="button" data-view="home">Current picks</button>
+        <button id="commissioner-menu-item" type="button" data-view="reviews" hidden>Group commissioner</button>
         <button type="button" data-view="place-picks">Place picks</button>
         <button type="button" data-view="history">Pick history</button>
         <button type="button" data-view="notifications">Notifications</button>
         <button type="button" data-view="account">Account info</button>
         <button id="admin-menu-item" type="button" data-view="admin" hidden>
-          Commissioner tools
+          App administration
         </button>
       </nav>
     </aside>
@@ -42,8 +44,8 @@
           <p class="eyebrow">Weekly football pool</p>
           <h1>Call every game.<br /><em>Own Monday night.</em></h1>
           <p class="lede">
-            Make your picks, predict Monday’s total, and compete for the full
-            weekly pool.
+            Make your picks, predict Monday’s total, and compete for the top
+            spot each week.
           </p>
         </div>
         <form id="auth-form" class="panel">
@@ -71,11 +73,22 @@
         </form>
       </section>
       <section id="dashboard" hidden>
+        <div class="group-bar"><label>Current group<select id="group-select" aria-label="Current group"></select></label><button type="button" data-view="groups">Manage groups</button></div>
+        <section id="groups-view" class="app-view page-view" hidden>
+          <div class="page-heading"><p class="eyebrow">Play together</p><h1>Your groups</h1><p>Create a group to become its commissioner, or join with an invite code.</p></div>
+          <div class="groups-forms">
+            <form id="create-group-form" class="panel"><h2>Create a group</h2><label>Group name<input name="name" minlength="2" maxlength="100" required></label><button type="submit">Create group</button></form>
+            <form id="join-group-form" class="panel"><h2>Join a group</h2><label>Invite code<input name="inviteCode" required autocomplete="off"></label><button type="submit">Join group</button></form>
+          </div>
+          <p id="group-message" class="error" role="status"></p>
+          <div id="group-list" class="groups-forms"></div>
+          <div class="group-members panel"><h2>Current group members</h2><div id="group-members"></div></div>
+        </section>
         <section id="home-view" class="app-view">
           <div class="hero">
             <p class="eyebrow">Your weekly board</p>
             <h1>Make the call.</h1>
-            <p>See the current pool and the latest unlocked community picks.</p>
+            <p>See approved entries and the latest unlocked community picks.</p>
           </div>
           <section id="community-board" class="community-board">
             <div id="pool-card" class="pool-card"></div>
@@ -143,19 +156,28 @@
                   max="200"
                   required /></label
               ><button class="primary" type="submit">Save picks</button
-              ><button id="checkout" class="gold" type="button" hidden>
+              ><button id="submit-review" class="gold" type="button" hidden>
                 Submit picks for review
               </button>
-              <p id="pick-message"></p>
+              <p id="pick-message" role="status" aria-live="polite"></p>
             </div>
           </form>
           <div id="leaderboard"></div>
         </section>
-        <section id="admin" class="app-view admin" hidden>
-          <div class="section-title">
-            <p class="eyebrow">Commissioner tools</p>
-            <h2>Build the board</h2>
-          </div>
+        <section id="reviews-view" class="app-view page-view" hidden>
+          <form id="group-settings-form" class="panel group-members">
+            <h2>Group settings</h2>
+            <label class="check"><input name="requirePickApproval" type="checkbox"> Require approval for member picks</label>
+            <p class="meta">Commissioners' own entries submit immediately. Changes apply to future submissions; entries already waiting still need a decision.</p>
+            <label class="check"><input name="allowMultipleEntries" type="checkbox"> Allow multiple entries per player each week</label>
+            <p class="meta">Turning this off prevents additional entries. Existing entries are kept.</p>
+            <label class="check"><input name="joiningEnabled" type="checkbox"> Allow new members to join by invite code</label>
+            <button type="submit">Save settings</button>
+            <button id="rotate-invite" type="button">Replace invite code</button>
+            <p class="meta">Replacing the code invalidates the old invitation. Existing members keep access.</p>
+            <p id="settings-message" role="status"></p>
+          </form>
+          <div class="page-heading"><p class="eyebrow">Group commissioner</p><h1>Review entries</h1><p>Approve or reject entries in the current group.</p></div>
           <section class="review-panel panel">
             <div>
               <h3>Pick review queue</h3>
@@ -166,6 +188,13 @@
             </div>
             <div id="pick-review-list"></div>
           </section>
+          <p id="review-message" class="error" role="status"></p>
+        </section>
+        <section id="admin" class="app-view admin" hidden>
+          <div class="section-title">
+            <p class="eyebrow">App administration</p>
+            <h2>Build the board</h2>
+          </div>
           <form id="schedule-import-form" class="panel import-panel">
             <div>
               <h3>Import a full schedule</h3>
@@ -289,7 +318,7 @@
                 type="number"
                 placeholder="Week ID"
                 required
-              /><button>Score & calculate pool</button>
+              /><button>Score week</button>
             </form>
           </div>
           <p id="admin-message"></p>

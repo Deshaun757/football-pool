@@ -3,6 +3,8 @@ declare global {
     interface Request {
       userId?: number;
       userRole?: 'player' | 'admin';
+      groupId?: number;
+      groupRole?: 'member' | 'commissioner';
     }
   }
 }

@@ -2,11 +2,9 @@ import { Router } from "express";
 import type { RowDataPacket } from "mysql2";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
-import { requireAuth } from "../middleware/auth.js";
-import { config } from "../config.js";
 
 export const weeksRouter = Router();
-weeksRouter.use(requireAuth);
+
 
 type BoardWeekRow = RowDataPacket & {
   id: number;
@@ -40,13 +38,9 @@ type BoardPickRow = RowDataPacket & {
   selectedTeamId: number;
   selectedAbbreviation: string;
 };
-type PoolRow = RowDataPacket & {
-  paidEntries: number;
-  poolCents: number;
-  grossCents: number;
-};
+type PoolRow = RowDataPacket & { approvedEntries: number };
 
-weeksRouter.get("/picks-board", async (_request, response) => {
+weeksRouter.get("/picks-board", async (request, response) => {
   const [lockedWeeks] = await pool.query<BoardWeekRow[]>(
     `SELECT id, name, week_number AS weekNumber, picks_lock_at AS picksLockAt, status
      FROM weeks WHERE status <> 'draft' AND picks_lock_at <= UTC_TIMESTAMP(3)
@@ -59,33 +53,20 @@ weeksRouter.get("/picks-board", async (_request, response) => {
   );
   const displayWeek = lockedWeeks[0] ?? null;
   const poolWeek = activeWeeks[0] ?? displayWeek;
-  let poolSummary = { paidEntries: 0, poolCents: 0, grossCents: 0 };
+  let poolSummary = { approvedEntries: 0 };
   if (poolWeek) {
-    const [poolRows] = config.PAYMENTS_ENABLED
-      ? await pool.query<PoolRow[]>(
-          `SELECT COUNT(*) AS paidEntries, COALESCE(SUM(COALESCE(p.net_amount_cents,p.gross_amount_cents)),0) AS poolCents,
-          COALESCE(SUM(p.gross_amount_cents),0) AS grossCents
-         FROM payments p JOIN entries e ON e.id=p.entry_id WHERE e.week_id=? AND p.status='paid'`,
-          [poolWeek.id],
-        )
-      : await pool.query<PoolRow[]>(
-          `SELECT COUNT(*) AS paidEntries, 0 AS poolCents, 0 AS grossCents FROM entries WHERE week_id=? AND status='submitted'`,
-          [poolWeek.id],
-        );
-    const summary = poolRows[0];
-    if (summary)
-      poolSummary = {
-        paidEntries: Number(summary.paidEntries),
-        poolCents: Number(summary.poolCents),
-        grossCents: Number(summary.grossCents),
-      };
+    const [rows] = await pool.query<PoolRow[]>(
+      "SELECT COUNT(*) AS approvedEntries FROM entries WHERE week_id=? AND group_id=? AND status='submitted'",
+      [poolWeek.id, request.groupId],
+    );
+    poolSummary = { approvedEntries: Number(rows[0]?.approvedEntries ?? 0) };
   }
   if (!displayWeek) {
     response.json({
       displayWeek: null,
       poolWeek,
       pool: poolSummary,
-      paymentsEnabled: config.PAYMENTS_ENABLED,
+
       games: [],
       entries: [],
     });
@@ -102,15 +83,15 @@ weeksRouter.get("/picks-board", async (_request, response) => {
   );
   const [entries] = await pool.query<BoardEntryRow[]>(
     `SELECT e.id, CONCAT(u.display_name,' · Entry ',e.entry_number) AS displayName, e.tiebreaker_total AS tiebreakerTotal
-     FROM entries e JOIN users u ON u.id=e.user_id WHERE e.week_id=? AND e.status='submitted'
+     FROM entries e JOIN users u ON u.id=e.user_id WHERE e.week_id=? AND e.group_id=? AND e.status='submitted'
      ORDER BY u.display_name`,
-    [displayWeek.id],
+    [displayWeek.id, request.groupId],
   );
   const [picks] = await pool.query<BoardPickRow[]>(
     `SELECT p.entry_id AS entryId, p.game_id AS gameId, p.selected_team_id AS selectedTeamId,
       t.abbreviation AS selectedAbbreviation FROM picks p JOIN teams t ON t.id=p.selected_team_id
-     JOIN entries e ON e.id=p.entry_id WHERE e.week_id=? AND e.status='submitted'`,
-    [displayWeek.id],
+     JOIN entries e ON e.id=p.entry_id WHERE e.week_id=? AND e.group_id=? AND e.status='submitted'`,
+    [displayWeek.id, request.groupId],
   );
   const picksByEntry = new Map<number, Map<number, BoardPickRow>>();
   for (const pick of picks) {
@@ -122,7 +103,7 @@ weeksRouter.get("/picks-board", async (_request, response) => {
     displayWeek,
     poolWeek,
     pool: poolSummary,
-    paymentsEnabled: config.PAYMENTS_ENABLED,
+
     games,
     entries: entries.map((entry) => ({
       ...entry,
@@ -137,10 +118,10 @@ weeksRouter.get("/weeks", async (request, response) => {
       COUNT(e.id) AS entryCount,
       SUM(CASE WHEN e.status='pending_review' THEN 1 ELSE 0 END) AS pendingCount,
       SUM(CASE WHEN e.status='submitted' THEN 1 ELSE 0 END) AS approvedCount
-     FROM weeks w LEFT JOIN entries e ON e.week_id = w.id AND e.user_id = ?
+     FROM weeks w LEFT JOIN entries e ON e.week_id = w.id AND e.user_id = ? AND e.group_id = ?
      WHERE w.status <> 'draft' GROUP BY w.id,w.name,w.week_number,w.picks_lock_at,w.status
      ORDER BY w.picks_lock_at DESC`,
-    [request.userId],
+    [request.userId, request.groupId],
   );
   response.json(rows);
 });
@@ -151,9 +132,9 @@ weeksRouter.get("/my-entries", async (request, response) => {
       e.tiebreaker_total AS tiebreakerTotal, e.correct_picks AS correctPicks,
       e.tiebreaker_difference AS tiebreakerDifference, e.submitted_at AS submittedAt,
       w.name AS weekName, w.week_number AS weekNumber, w.picks_lock_at AS picksLockAt
-     FROM entries e JOIN weeks w ON w.id=e.week_id WHERE e.user_id=?
+     FROM entries e JOIN weeks w ON w.id=e.week_id WHERE e.user_id=? AND e.group_id=?
      ORDER BY w.picks_lock_at DESC,e.entry_number ASC`,
-    [request.userId],
+    [request.userId, request.groupId],
   );
   response.json(rows);
 });
@@ -170,8 +151,8 @@ weeksRouter.get("/weeks/:weekId", async (request, response) => {
   );
   const [entries] = await pool.query<RowDataPacket[]>(
     `SELECT id,status,entry_number AS entryNumber,label,tiebreaker_total AS tiebreakerTotal,
-      submitted_at AS submittedAt FROM entries WHERE user_id=? AND week_id=? ORDER BY entry_number ASC`,
-    [request.userId, weekId],
+      submitted_at AS submittedAt FROM entries WHERE user_id=? AND week_id=? AND group_id=? ORDER BY entry_number ASC`,
+    [request.userId, weekId, request.groupId],
   );
   const requestedEntry = request.query.entryId;
   let selectedEntry: RowDataPacket | null = null;
@@ -212,13 +193,12 @@ weeksRouter.get("/weeks/:weekId/leaderboard", async (request, response) => {
   const [rows] = await pool.query(
     `SELECT CONCAT(u.display_name,' · Entry ',e.entry_number) AS displayName, e.correct_picks AS correctPicks,
       CASE WHEN w.picks_lock_at <= UTC_TIMESTAMP(3) THEN e.tiebreaker_total ELSE NULL END AS tiebreakerTotal,
-      e.tiebreaker_difference AS tiebreakerDifference,
-      ww.prize_cents AS prizeCents, ww.payout_status AS payoutStatus
+      e.tiebreaker_difference AS tiebreakerDifference
      FROM entries e JOIN users u ON u.id=e.user_id JOIN weeks w ON w.id=e.week_id
-     LEFT JOIN weekly_winners ww ON ww.entry_id=e.id AND ww.week_id=e.week_id
-     WHERE e.week_id=? AND e.status='submitted'
+
+     WHERE e.week_id=? AND e.group_id=? AND e.status='submitted'
      ORDER BY e.correct_picks DESC, e.tiebreaker_difference ASC, e.submitted_at ASC`,
-    [weekId],
+    [weekId, request.groupId],
   );
   response.json(rows);
 });

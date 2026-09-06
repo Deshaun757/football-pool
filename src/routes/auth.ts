@@ -59,7 +59,16 @@ authRouter.post('/logout', requireAuth, async (request, response) => {
   response.status(204).end();
 });
 
-authRouter.get('/me', requireAuth, async (request, response) => {
+// A logged-out or expired session is a normal result of the browser's session check.
+authRouter.get('/me', (request, response, next) => {
+  void requireAuth(request, response, (error?: unknown) => {
+    if (error instanceof HttpError && error.status === 401) {
+      response.json(null);
+      return;
+    }
+    next(error);
+  });
+}, async (request, response) => {
   const [rows] = await pool.query<UserRow[]>('SELECT id, email, display_name, role FROM users WHERE id = ?', [request.userId]);
   const user = rows[0]!;
   response.json({ id: user.id, email: user.email, displayName: user.display_name, role: user.role });

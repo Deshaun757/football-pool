@@ -1,40 +1,49 @@
-# Weekly Pick’em
+﻿# Weekly Pick’em
 
-Node.js/TypeScript and MySQL 8.4 foundation for a weekly football pick’em pool. Entries remain drafts until Stripe reports a successful payment through a signature-verified webhook.
+A Node.js/TypeScript and MySQL 8.4 football pick’em pool. Players submit ballots for commissioner approval. The app does not collect payments.
 
 ## Local setup
 
-1. Copy `.env.example` to `.env` and add Stripe test credentials.
-2. Start MySQL with `docker compose up -d mysql`.
+1. Copy `.env.example` to `.env`. Set `ADMIN_EMAIL` before registering the app administrator account.
+2. Run `docker compose up -d mysql` and wait for MySQL to become healthy.
 3. Run `npm install`, `npm run db:migrate`, then `npm run dev`.
-4. Forward Stripe test events with `stripe listen --forward-to localhost:3000/webhooks/stripe` and copy its signing secret into `.env`.
+4. Open http://localhost:3000, register, and import a schedule from App administration.
 
-To preview a completed previous-week dashboard with fake players, paid entries, picks, results, and a prize pool, run `npm run db:seed-demo`. The seed is clearly labeled and safe to run repeatedly. Demo accounts use reserved `.invalid` email addresses and cannot log in.
+For compiled operation, run `npm run build` and `npm start`. Run tests with `npm test`.
 
-Registration and login use salted scrypt password hashes and opaque, HTTP-only session cookies. Set `ADMIN_EMAIL` before registering the commissioner account; that matching account receives administrator access.
+After importing teams, `npm run db:seed-demo` creates a labeled completed demo week with fictional players, picks, and results. Demo accounts cannot log in.
 
-## Implemented flow
+## Entries and results
 
-- `PUT /api/weeks/:weekId/entry` validates and saves a complete draft ballot.
-- `POST /api/entries/:entryId/checkout` creates one idempotent Stripe Checkout Session.
-- `POST /webhooks/stripe` verifies the raw-body signature and atomically changes payment to `paid` and entry to `submitted`.
-- Duplicate webhook events are ignored safely.
-- `charge.updated` reconciles Stripe's exact processing fee and net pool contribution once its balance transaction is available.
+Players can create multiple numbered entries per week. Each ballot requires one selection per game and a predicted combined score for the tiebreaker game.
 
-The success redirect is informational only and never submits an entry. The web interface also includes weekly ballots, standings, and commissioner forms for schedules, results, scoring, and pool calculation.
+- Save a draft with `PUT /api/groups/:groupId/weeks/:weekId/entry`.
+- Submit it with `POST /api/groups/:groupId/entries/:entryId/submit-review`.
+- Pending entries are locked until approved or rejected. Rejected entries can be edited and resubmitted before the deadline.
+- Decisions create in-app notifications. Approved picks become visible to signed-in players after the deadline.
 
-## Schedule import and team badges
+The app administrator enters shared final results and scores the week. Winners are calculated independently for each group: most correct picks wins, followed by the smallest absolute tiebreaker difference. Exact ties remain co-winners. No payment processing or payouts are performed.
 
-The commissioner screen can import a complete regular season from the nflverse schedules release or upload the same `games.csv` format manually. Imports are repeatable: stable external game IDs update scheduled kickoff times instead of creating duplicates. Schedule data is provided by [nflverse](https://github.com/nflverse/nflverse-data) under its published CC-BY-4.0 license.
+Accounts use salted scrypt password hashes and HTTP-only session cookies.
 
-All 32 teams use locally served PNG artwork from `public/logos` when those files are installed, with locally rendered color-and-abbreviation badges available as a fallback. A commissioner can also provide a custom HTTPS logo URL when adding a team. Obtain appropriate permission before publicly distributing trademarked artwork.
+## Schedules and badges
 
-## Money model
+The app administrator can import a regular season from [nflverse](https://github.com/nflverse/nflverse-data) or upload its games.csv format. Repeated imports update schedules using stable external game IDs. Downloads require outbound internet access from the server. Schedule data is provided under nflverse's published CC-BY-4.0 license.
 
-When payments are explicitly enabled, amounts are stored as integer cents and each payment tracks gross, Stripe processing fee, and net contribution separately. Exact ties split a configured pool evenly, with any remainder cents assigned by entry ID. Payments and payouts should remain disabled unless the contest and processor eligibility are independently confirmed.
+Team logos are served from public/logos; local badge routes are also available. Obtain appropriate permission before publicly distributing trademarked artwork.
 
-## Commissioner pick review
+Historical migrations retain unused payment tables and monetary columns for compatibility with existing databases. Current code does not read payment records or accept payments.
 
-Payments are disabled by default with `PAYMENTS_ENABLED=false`. In this mode, a player saves a complete ballot and submits it for review. The entry becomes locked in `pending_review`, commissioner accounts receive an in-app badge and review-queue item, and only an approved entry moves to `submitted`. Rejected entries unlock for correction and can be submitted again. The public community board continues to enforce the weekly deadline before revealing approved selections.
+## Groups and permissions
 
-Players may create multiple numbered entries for the same week. Each entry has independent picks, a tiebreaker, review status, history, scoring, and public-board row. Approval and rejection decisions create player notifications in the in-app inbox; unread notifications appear as a badge on the hamburger menu.
+Any registered player can create a group and becomes that group's commissioner. Commissioners share an invite code from My groups; players use it to join. Players may belong to multiple groups and switch between them using the current-group selector.
+
+Group names are unique across the app, ignoring capitalization and extra whitespace. Display capitalization is preserved. A database unique index prevents simultaneous requests from creating duplicates; invite codes remain the way to join a group.
+
+Commissioners' own picks submit immediately without review. In Group commissioner, commissioners and app administrators can toggle member pick approval, multiple entries per week, and joining by invite code, or replace the invite code. All three toggles default to enabled. Approval changes affect future submissions; pending entries still need a decision. Disabling multiple entries preserves existing ballots. Disabling joining or rotating codes never removes existing members. Deadlines still apply to everyone.
+
+Each group has independent entries, entry numbering, picks, standings, review queues, and notifications. Commissioners approve or reject only their group's entries. Group creation never grants app administrator privileges. Schedules, deadlines, and game results are shared and managed by the app administrator, who can oversee every group.
+
+Migration 006 preserves existing entries and memberships in Original pool, with the earliest existing administrator as its commissioner. New registrations do not join it automatically.
+
+Run `npm run test:groups` after database migrations and importing teams to test group permissions and scoring against the configured database. The test creates isolated fixtures and removes them afterward.

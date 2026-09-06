@@ -75,25 +75,19 @@ try {
     );
     const [users] = await connection.query<IdRow[]>('SELECT id FROM users WHERE email=?', [player.email]);
     const userId = users[0]!.id;
+    await connection.execute('INSERT IGNORE INTO group_members (group_id,user_id) VALUES (1,?)',[userId]);
     await connection.execute(
       `INSERT INTO entries (user_id, week_id, status, tiebreaker_total, submitted_at)
        VALUES (?, ?, 'submitted', ?, '2026-01-04 16:30:00') ON DUPLICATE KEY UPDATE status='submitted',
        tiebreaker_total=VALUES(tiebreaker_total), submitted_at=VALUES(submitted_at)`, [userId, weekId, player.tiebreaker]
     );
-    const [entries] = await connection.query<IdRow[]>('SELECT id FROM entries WHERE user_id=? AND week_id=?', [userId, weekId]);
+    const [entries] = await connection.query<IdRow[]>('SELECT id FROM entries WHERE user_id=? AND week_id=? AND group_id=1', [userId, weekId]);
     const entryId = entries[0]!.id;
     await connection.execute('DELETE FROM picks WHERE entry_id=?', [entryId]);
     for (let gameIndex = 0; gameIndex < games.length; gameIndex++) {
       const game = games[gameIndex]!;
       await connection.execute('INSERT INTO picks (entry_id, game_id, selected_team_id) VALUES (?, ?, ?)', [entryId, gameIds.get(game.externalId)!, teamIds.get(selections[playerIndex]![gameIndex]!)!]);
     }
-    await connection.execute(
-      `INSERT INTO payments (entry_id, checkout_session_id, payment_intent_id, gross_amount_cents, processor_fee_cents,
-       net_amount_cents, status, paid_at) VALUES (?, ?, ?, 1000, 59, 941, 'paid', '2026-01-04 16:30:00')
-       ON DUPLICATE KEY UPDATE entry_id=VALUES(entry_id), gross_amount_cents=1000, processor_fee_cents=59,
-       net_amount_cents=941, status='paid', paid_at=VALUES(paid_at)`,
-      [entryId, `cs_demo_${playerIndex + 1}`, `pi_demo_${playerIndex + 1}`]
-    );
   }
   await connection.commit();
 } catch (error) {
@@ -104,5 +98,5 @@ try {
 }
 
 const result = await scoreWeek(weekId!);
-console.log(`Demo data ready: ${players.length} players, ${games.length} games, $${(result.prizePoolCents / 100).toFixed(2)} pool, ${result.winners} winner(s)`);
+console.log(`Demo data ready: ${players.length} players, ${games.length} games, ${result.winners} winner(s)`);
 await pool.end();

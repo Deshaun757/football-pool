@@ -1,11 +1,8 @@
 import { Router } from "express";
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { z } from "zod";
-import { config } from "../config.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../lib/http-error.js";
-import { requireAuth } from "../middleware/auth.js";
-import { stripe } from "../services/stripe.js";
 import { validatePicks } from "../services/entry-validation.js";
 
 const saveSchema = z.object({
@@ -37,7 +34,7 @@ type EntryRow = RowDataPacket & {
 };
 
 export const entriesRouter = Router();
-entriesRouter.use(requireAuth);
+
 
 entriesRouter.put("/weeks/:weekId/entry", async (request, response) => {
   const userId = request.userId!;
@@ -50,6 +47,7 @@ entriesRouter.put("/weeks/:weekId/entry", async (request, response) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
+    const [settings] = await connection.query<RowDataPacket[]>('SELECT allow_multiple_entries FROM pool_groups WHERE id=? FOR UPDATE',[request.groupId!]);
     const [weeks] = await connection.query<WeekRow[]>(
       "SELECT id, status, picks_lock_at FROM weeks WHERE id = ? FOR UPDATE",
       [weekId],
@@ -74,8 +72,8 @@ entriesRouter.put("/weeks/:weekId/entry", async (request, response) => {
     let entry: EntryRow | undefined;
     if (body.entryId) {
       const [entries] = await connection.query<EntryRow[]>(
-        "SELECT id,status,tiebreaker_total,entry_number FROM entries WHERE id=? AND user_id=? AND week_id=? FOR UPDATE",
-        [body.entryId, userId, weekId],
+        "SELECT id,status,tiebreaker_total,entry_number FROM entries WHERE id=? AND user_id=? AND week_id=? AND group_id=? FOR UPDATE",
+        [body.entryId, userId, weekId, request.groupId!],
       );
       entry = entries[0];
       if (entry && ["draft", "rejected"].includes(entry.status)) {
@@ -89,13 +87,15 @@ entriesRouter.put("/weeks/:weekId/entry", async (request, response) => {
       const [numberRows] = await connection.query<
         (RowDataPacket & { next_number: number })[]
       >(
-        "SELECT COALESCE(MAX(entry_number),0)+1 AS next_number FROM entries WHERE user_id=? AND week_id=?",
-        [userId, weekId],
+        "SELECT COALESCE(MAX(entry_number),0)+1 AS next_number FROM entries WHERE user_id=? AND week_id=? AND group_id=?",
+        [userId, weekId, request.groupId!],
       );
       const entryNumber = Number(numberRows[0]?.next_number ?? 1);
+      if (!settings[0]?.allow_multiple_entries && entryNumber > 1)
+        throw new HttpError(409, 'This group allows one entry per player per week');
       const [result] = await connection.execute<ResultSetHeader>(
-        "INSERT INTO entries (user_id,week_id,entry_number,tiebreaker_total) VALUES (?,?,?,?)",
-        [userId, weekId, entryNumber, body.tiebreakerTotal],
+        "INSERT INTO entries (user_id,week_id,entry_number,tiebreaker_total,group_id) VALUES (?,?,?,?,?)",
+        [userId, weekId, entryNumber, body.tiebreakerTotal, request.groupId!],
       );
       entry = {
         id: result.insertId,
@@ -142,13 +142,14 @@ entriesRouter.post(
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
+      const [settings] = await connection.query<RowDataPacket[]>('SELECT require_pick_approval FROM pool_groups WHERE id=? FOR UPDATE',[request.groupId!]);
       const [entries] = await connection.query<
         (EntryRow & { week_name: string })[]
       >(
         `SELECT e.id, e.status, e.tiebreaker_total, w.name AS week_name FROM entries e
-       JOIN weeks w ON w.id=e.week_id WHERE e.id=? AND e.user_id=? AND w.status='open'
+       JOIN weeks w ON w.id=e.week_id WHERE e.id=? AND e.user_id=? AND e.group_id=? AND w.status='open'
        AND w.picks_lock_at>UTC_TIMESTAMP(3) FOR UPDATE`,
-        [entryId, userId],
+        [entryId, userId, request.groupId!],
       );
       const entry = entries[0];
       if (!entry || !["draft", "rejected"].includes(entry.status))
@@ -170,14 +171,16 @@ entriesRouter.post(
           "Complete every pick and the tiebreaker before submitting",
         );
       }
+      const needsReview = Boolean(settings[0]?.require_pick_approval) && request.groupRole !== 'commissioner';
+      const status = needsReview ? 'pending_review' : 'submitted';
       await connection.execute(
-        "UPDATE entries SET status='pending_review', submitted_at=UTC_TIMESTAMP(3) WHERE id=?",
-        [entryId],
+        "UPDATE entries SET status=?, submitted_at=UTC_TIMESTAMP(3) WHERE id=?",
+        [status, entryId],
       );
       const [admins] = await connection.query<
         (RowDataPacket & { id: number })[]
-      >("SELECT id FROM users WHERE role='admin'");
-      for (const admin of admins) {
+      >("SELECT user_id AS id FROM group_members WHERE group_id=? AND role='commissioner'", [request.groupId!]);
+      for (const admin of needsReview ? admins : []) {
         await connection.execute(
           `INSERT INTO notifications (user_id,entry_id,type,message) VALUES (?,?,'pick_review_requested',?)
          ON DUPLICATE KEY UPDATE message=VALUES(message),read_at=NULL,created_at=CURRENT_TIMESTAMP(3)`,
@@ -189,7 +192,7 @@ entriesRouter.post(
         );
       }
       await connection.commit();
-      response.json({ entryId, status: "pending_review" });
+      response.json({ entryId, status });
     } catch (error) {
       await connection.rollback();
       throw error;
@@ -198,65 +201,3 @@ entriesRouter.post(
     }
   },
 );
-
-entriesRouter.post("/entries/:entryId/checkout", async (request, response) => {
-  if (!config.PAYMENTS_ENABLED)
-    throw new HttpError(403, "Online payments are disabled");
-  const userId = request.userId!;
-  const entryId = z.coerce
-    .number()
-    .int()
-    .positive()
-    .parse(request.params.entryId);
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-    const [entries] = await connection.query<EntryRow[]>(
-      `SELECT e.id, e.status, e.tiebreaker_total
-       FROM entries e JOIN weeks w ON w.id = e.week_id
-       WHERE e.id = ? AND e.user_id = ? AND w.status = 'open' AND w.picks_lock_at > UTC_TIMESTAMP(3)
-       FOR UPDATE`,
-      [entryId, userId],
-    );
-    const entry = entries[0];
-    if (!entry || entry.status !== "draft")
-      throw new HttpError(409, "This entry is not available for checkout");
-
-    const session = await stripe.checkout.sessions.create(
-      {
-        mode: "payment",
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            quantity: 1,
-            price_data: {
-              currency: "usd",
-              unit_amount: config.ENTRY_FEE_CENTS,
-              product_data: { name: "Weekly Pick’em Entry" },
-            },
-          },
-        ],
-        metadata: { entryId: String(entryId), userId: String(userId) },
-        success_url: `${config.APP_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${config.APP_URL}/payment/cancelled`,
-      },
-      { idempotencyKey: `entry-${entryId}` },
-    );
-
-    await connection.execute(
-      "INSERT INTO payments (entry_id, checkout_session_id, gross_amount_cents) VALUES (?, ?, ?)",
-      [entryId, session.id, config.ENTRY_FEE_CENTS],
-    );
-    await connection.execute(
-      "UPDATE entries SET status = 'checkout_pending' WHERE id = ?",
-      [entryId],
-    );
-    await connection.commit();
-    response.status(201).json({ checkoutUrl: session.url });
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-});
