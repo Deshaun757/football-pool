@@ -10,10 +10,11 @@ import { hashPassword, verifyPassword } from '../lib/password.js';
 import { requireAuth } from '../middleware/auth.js';
 import { passwordPair } from '../lib/password-policy.js';
 import { sendPasswordReset } from '../services/email.js';
+import { queueEmail } from '../services/email-outbox.js';
 import { rateLimit } from 'express-rate-limit';
 
 const credentials = z.object({ email: z.string().email().max(320).transform((v) => v.toLowerCase()), password: z.string().min(10).max(200) });
-const registerSchema = passwordPair.safeExtend({email:credentials.shape.email, displayName: z.string().trim().min(2).max(100) });
+const registerSchema = passwordPair.safeExtend({email:credentials.shape.email, displayName: z.string().trim().min(2).max(100), acceptTerms:z.literal(true) });
 type UserRow = RowDataPacket & { id: number; email: string; display_name: string; password_hash: string | null; role: 'player' | 'admin' };
 
 export const authRouter = Router();
@@ -86,14 +87,20 @@ authRouter.post('/register', async (request, response) => {
   const body = registerSchema.parse(request.body);
   const passwordHash = await hashPassword(body.password);
   const role = config.ADMIN_EMAIL?.toLowerCase() === body.email ? 'admin' : 'player';
+  const connection = await pool.getConnection();
   try {
-    const [result] = await pool.execute<ResultSetHeader>('INSERT INTO users (email, display_name, password_hash, role) VALUES (?, ?, ?, ?)', [body.email, body.displayName, passwordHash, role]);
+    await connection.beginTransaction();
+    const [result] = await connection.execute<ResultSetHeader>(`INSERT INTO users (email, display_name, password_hash, role,terms_version,terms_accepted_at) VALUES (?, ?, ?, ?,'2026-09-06',UTC_TIMESTAMP(3))`, [body.email, body.displayName, passwordHash, role]);
+    await queueEmail(connection,{key:`welcome:${result.insertId}`,kind:'welcome',to:body.email,userId:result.insertId,
+      subject:"Welcome to Huddle Pick'em!",body:`Hi ${body.displayName},\n\nYour account is ready. Create a group to become its commissioner, or join a group with an invite code.\n\nGet started: ${config.APP_URL}`});
+    await connection.commit();
     setSessionCookie(response, await createSession(result.insertId));
     response.status(201).json({ id: result.insertId, email: body.email, displayName: body.displayName, role });
   } catch (error: unknown) {
+    await connection.rollback();
     if ((error as { code?: string }).code === 'ER_DUP_ENTRY') throw new HttpError(409, 'An account already exists for that email');
     throw error;
-  }
+  } finally { connection.release(); }
 });
 
 authRouter.post('/login', async (request, response) => {

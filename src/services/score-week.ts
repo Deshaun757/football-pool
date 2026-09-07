@@ -2,6 +2,9 @@ import type { RowDataPacket } from 'mysql2';
 import { pool } from '../db/pool.js';
 import { HttpError } from '../lib/http-error.js';
 import { findWinners, type ScoredEntry } from './scoring.js';
+import { queueEmail } from './email-outbox.js';
+import { config } from '../config.js';
+import { createHash } from 'node:crypto';
 
 type WeekRow = RowDataPacket & { id: number };
 type EntryScoreRow = RowDataPacket & { entry_id: number; group_id: number; tiebreaker_total: number; correct_picks: number };
@@ -51,6 +54,20 @@ export async function scoreWeek(weekId: number): Promise<{ winners: number }> {
       );
     }
     await connection.execute("UPDATE weeks SET status = 'final' WHERE id = ?", [weekId]);
+    const [recipients]=await connection.query<RowDataPacket[]>(`SELECT u.id,u.email,g.id AS groupId,g.name,w.name AS weekName
+      FROM weekly_results r JOIN pool_groups g ON g.id=r.group_id JOIN group_members m ON m.group_id=g.id
+      JOIN users u ON u.id=m.user_id JOIN weeks w ON w.id=r.week_id WHERE r.week_id=?`,[weekId]);
+    for(const groupId of new Set(scores.map(row=>row.group_id))) {
+      const [leaders]=await connection.query<RowDataPacket[]>(`SELECT u.display_name,e.entry_number,e.correct_picks,e.tiebreaker_difference
+        FROM weekly_winners win JOIN entries e ON e.id=win.entry_id JOIN users u ON u.id=e.user_id
+        WHERE win.week_id=? AND e.group_id=? ORDER BY e.id`,[weekId,groupId]);
+      const groupScores=scores.filter(row=>row.group_id===groupId).sort((a,b)=>a.entry_id-b.entry_id);
+      const revision=createHash('sha256').update(JSON.stringify([actualTotal,groupScores])).digest('hex').slice(0,24);
+      for(const row of recipients.filter(row=>row.groupId===groupId)) await queueEmail(connection,{
+        key:`results:${groupId}:${weekId}:${row.id}:${revision}`,kind:'results',to:row.email,userId:row.id,groupId,weekId,
+        subject:"Huddle Pick'em: weekly results are ready",
+        body:`${row.weekName} results for ${row.name} are ready.\n\nWinner${leaders.length===1?'':'s'}:\n${leaders.map(winner=>`${winner.display_name} (entry #${winner.entry_number}): ${winner.correct_picks} correct picks, tiebreaker difference ${winner.tiebreaker_difference}`).join('\n')}\n\nSee your results in Pick history: ${config.APP_URL}`});
+    }
     await connection.commit();
     return { winners: winnerCount };
   } catch (error) { await connection.rollback(); throw error; }

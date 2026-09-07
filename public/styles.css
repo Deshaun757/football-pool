@@ -74,6 +74,9 @@ header {
   backdrop-filter: blur(2px);
 }
 .drawer {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 20;
@@ -135,6 +138,9 @@ header {
   color: var(--green);
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-family: Georgia, serif;
   font-size: 21px;
   color: var(--ink);
@@ -144,6 +150,16 @@ header {
 .brand span {
   color: var(--green);
 }
+.brand-icon { width: 32px; height: 32px; flex-shrink: 0; }
+.required-mark { color: #b3261e; }
+.site-footer { display:flex; flex-wrap:wrap; justify-content:center; gap:16px; padding:24px 20px 100px; }
+.site-footer a { color:var(--green); }
+@media(min-width:761px) { body.signed-in .site-footer { margin-left:250px; } }
+#auth-form:not(.register-mode) .required-mark { display: none; }
+.drawer-footer { margin-top: auto; padding-top: 24px; flex-shrink: 0; }
+.drawer-footer button { width: 100%; text-align: left; }
+.drawer-footer .error:empty { display: none; }
+[data-view]:disabled { cursor: not-allowed; }
 nav {
   display: flex;
   gap: 16px;

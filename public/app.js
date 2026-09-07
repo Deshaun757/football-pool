@@ -83,6 +83,9 @@ async function boot() {
 }
 
 function configureAuth() {
+  $('#terms-label').hidden = !registerMode;
+  $('#accept-terms').required = registerMode;
+  $('#auth-form').classList.toggle('register-mode', registerMode);
   const resetting = location.pathname === '/reset-password';
   const newPassword = registerMode || resetting;
   $('#name-label').hidden = !registerMode;
@@ -134,7 +137,10 @@ $('#auth-form').onsubmit = async event => {
       configureAuth(); $('#auth-error').textContent = result.message;
       return;
     }
-    if (registerMode) body.displayName = $('#display-name').value;
+    if (registerMode) {
+      body.displayName = $('#display-name').value;
+      body.acceptTerms = $('#accept-terms').checked;
+    }
     me = await api('/api/auth/' + (registerMode ? 'register' : 'login'),{method:'POST',body:JSON.stringify(body)});
     await showDashboard();
   } catch(error) { $('#auth-error').textContent = error.message; }
@@ -207,7 +213,7 @@ function setupNavigation() {
 function showView(view) {
   if (view === "admin" && me.role !== "admin") view = "home";
   if (view === 'reviews' && !canReview()) view = 'groups';
-  if (!activeGroup && !['groups','account','admin'].includes(view)) view = 'groups';
+  if (!activeGroup && view !== 'groups') view = 'groups';
   activeView = view;
   $("#week-detail").hidden = true;
   document.querySelectorAll(".app-view").forEach((section) => {
@@ -229,10 +235,17 @@ function showView(view) {
 
 function renderAccount() {
   $("#account-card").innerHTML =
-    `<dl class="account-details"><div><dt>Display name</dt><dd>${esc(me.displayName)}</dd></div><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl><button id="account-logout" type="button">Log out</button>`;
-  $("#account-logout").onclick = async () => {
-    await api("/api/auth/logout", { method: "POST" });
-    location.reload();
+    `<dl class="account-details"><div><dt>Display name</dt><dd>${esc(me.displayName)}</dd></div><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl><p><a href="/support.html">Email preferences, support &amp; privacy requests</a></p>`;
+  $("#menu-logout").onclick = async (event) => {
+    event.currentTarget.disabled = true;
+    $("#logout-error").textContent = "";
+    try {
+      await api("/api/auth/logout", { method: "POST" });
+      location.reload();
+    } catch (error) {
+      $("#logout-error").textContent = error.message;
+      $("#menu-logout").disabled = false;
+    }
   };
 }
 
@@ -684,6 +697,11 @@ async function loadGroups() {
   activeGroup = groups.find(group => group.id === saved) ?? groups[0] ?? null;
   $('#group-select').innerHTML = groups.length ? groups.map(group => `<option value="${group.id}" ${group.id === activeGroup?.id ? 'selected' : ''}>${esc(group.name)}</option>`).join('') : '<option>No groups yet</option>';
   $('#group-select').disabled = !groups.length;
+  document.querySelectorAll('[data-view]').forEach(button => {
+    const locked = !activeGroup && button.dataset.view !== 'groups';
+    button.disabled = locked;
+    button.title = locked ? 'Create or join a group to unlock this tab.' : '';
+  });
   $('#commissioner-menu-item').hidden = !canReview();
   for (const name of ['requirePickApproval','allowMultipleEntries','joiningEnabled']) $('#group-settings-form').elements[name].checked = !!activeGroup?.[name];
   $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
@@ -730,5 +748,17 @@ $('#rotate-invite').onclick = async event => {
     $('#settings-message').textContent = 'Invite code replaced. Find the new code in My groups.';
   } catch(error) { $('#settings-message').textContent = error.message; }
   finally { event.target.disabled = false; }
+};
+$('#group-invite-form').onsubmit = async event => {
+  event.preventDefault();
+  const button=event.target.querySelector('button');
+  button.disabled=true;
+  $('#invite-message').textContent='';
+  try {
+    const result=await api('/api/groups/'+activeGroup.id+'/invitations',{method:'POST',body:JSON.stringify(formObject(event.target))});
+    $('#invite-message').textContent=result.message;
+    event.target.reset();
+  } catch(error) { $('#invite-message').textContent=error.message; }
+  finally { button.disabled=false; }
 };
 boot();

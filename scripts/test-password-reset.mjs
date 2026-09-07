@@ -10,8 +10,8 @@ let userId,mailId;
 async function post(path,body){return fetch(base+'/api/auth/'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});}
 try{
   const password='Abcdefg1!x';
-  assert.equal((await post('register',{email,displayName:'Reset test',password,confirmPassword:'no'})).status,400);
-  const registration=await post('register',{email,displayName:'Reset test',password,confirmPassword:password});
+  assert.equal((await post('register',{acceptTerms:true,email,displayName:'Reset test',password,confirmPassword:'no'})).status,400);
+  const registration=await post('register',{acceptTerms:true,email,displayName:'Reset test',password,confirmPassword:password});
   assert.equal(registration.status,201);
   userId=(await registration.json()).id;
   const cookie=registration.headers.get('set-cookie').split(';')[0];

@@ -6,6 +6,8 @@ import { pool } from '../db/pool.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireGroup, requireCommissioner } from '../middleware/group.js';
 import { HttpError } from '../lib/http-error.js';
+import { queueEmail } from '../services/email-outbox.js';
+import { config } from '../config.js';
 
 export const groupsRouter = Router();
 groupsRouter.use(requireAuth);
@@ -74,6 +76,26 @@ groupsRouter.post('/:groupId/invite-code', requireGroup, requireCommissioner, as
   const inviteCode=randomBytes(16).toString('hex');
   await pool.execute('UPDATE pool_groups SET invite_code=? WHERE id=?',[inviteCode,request.groupId!]);
   response.json({inviteCode});
+});
+
+groupsRouter.post('/:groupId/invitations', requireGroup, requireCommissioner, async (request,response) => {
+  const {email}=z.object({email:z.string().trim().email().max(320).transform(value=>value.toLowerCase())}).parse(request.body);
+  const db=await pool.getConnection();
+  try {
+    await db.beginTransaction();
+    const [groups]=await db.query<RowDataPacket[]>('SELECT name,invite_code,joining_enabled FROM pool_groups WHERE id=? FOR UPDATE',[request.groupId!]);
+    const group=groups[0];
+    if(!group) throw new HttpError(404,'Group not found');
+    if(!group.joining_enabled) throw new HttpError(409,'Enable new members joining before sending invitations');
+    const [recent]=await db.query<RowDataPacket[]>(`SELECT id FROM email_outbox WHERE kind='invitation' AND group_id=? AND created_at>DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 HOUR)`,[request.groupId!]);
+    if(recent.length>=20) throw new HttpError(429,'This group has sent 20 invitations this hour. Please try again later.');
+    const [duplicate]=await db.query<RowDataPacket[]>(`SELECT id FROM email_outbox WHERE kind='invitation' AND group_id=? AND recipient=? AND created_at>DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 HOUR)`,[request.groupId!,email]);
+    if(duplicate.length) throw new HttpError(429,'An invitation was already queued for this address within the last hour.');
+    await queueEmail(db,{kind:'invitation',to:email,groupId:request.groupId!,expiresAt:new Date(Date.now()+7*86400000),
+      subject:"You're invited to Huddle Pick'em",body:`You're invited to join ${group.name}!\n\nVisit ${config.APP_URL} and sign in or create an account. In My groups, enter this invite code:\n\n${group.invite_code}\n\nThis code works while the commissioner allows joining and keeps this invite code active.`});
+    await db.commit();
+    response.status(202).json({message:'Invitation queued for email delivery.'});
+  } catch(error) {await db.rollback();throw error;} finally {db.release();}
 });
 
 groupsRouter.get('/:groupId/members', requireGroup, async (request,response) => {

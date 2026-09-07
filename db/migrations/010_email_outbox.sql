@@ -1,0 +1,22 @@
+CREATE TABLE email_outbox (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  event_key VARCHAR(191) NOT NULL,
+  recipient VARCHAR(320) NOT NULL,
+  subject VARCHAR(255) NOT NULL,
+  body TEXT NOT NULL,
+  kind VARCHAR(30) NOT NULL,
+  user_id BIGINT UNSIGNED NULL,
+  group_id BIGINT UNSIGNED NULL,
+  week_id BIGINT UNSIGNED NULL,
+  expires_at DATETIME(3) NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  available_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  sent_at DATETIME(3) NULL,
+  cancelled_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY email_event_unique (event_key),
+  KEY email_pending (sent_at,cancelled_at,available_at),
+  CONSTRAINT email_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT email_group_fk FOREIGN KEY (group_id) REFERENCES pool_groups(id) ON DELETE CASCADE,
+  CONSTRAINT email_week_fk FOREIGN KEY (week_id) REFERENCES weeks(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { app } from '../dist/app.js';
 import { pool } from '../dist/db/pool.js';
+import { queueReminders } from '../dist/services/email-outbox.js';
 const server = app.listen(0, '127.0.0.1');
 await new Promise(resolve => server.once('listening', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -16,7 +17,7 @@ async function call(cookie, path, method = 'GET', body, status = 200) {
   return {data, cookie: response.headers.get('set-cookie')?.split(';')[0]};
 }
 async function register(name) {
-  const result = await call(null, '/api/auth/register', 'POST', {email:`groups-${suffix}-${name}@example.invalid`,displayName:`Test ${name}`,password:'IntegrationPass!2026',confirmPassword:'IntegrationPass!2026'},201);
+  const result = await call(null, '/api/auth/register', 'POST', {acceptTerms:true,email:`groups-${suffix}-${name}@example.invalid`,displayName:`Test ${name}`,password:'IntegrationPass!2026',confirmPassword:'IntegrationPass!2026'},201);
   users.push(result.data.id);
   return {...result.data,cookie:result.cookie};
 }
@@ -30,6 +31,12 @@ try {
   await pool.execute("UPDATE users SET role='admin' WHERE id=?",[admin.id]);
   assert.deepEqual((await call(member.cookie,'/api/groups')).data,[]);
   const a=await create(ownerA,'Group A'), b=await create(ownerB,'Group B');
+  const [welcome]=await pool.query("SELECT * FROM email_outbox WHERE user_id=? AND kind='welcome'",[member.id]);
+  assert.equal(welcome.length,1);
+  await call(member.cookie,`/api/groups/${a}/invitations`,'POST',{email:'invite@example.invalid'},403);
+  await call(ownerA.cookie,`/api/groups/${a}/invitations`,'POST',{email:'invalid'},400);
+  await call(ownerA.cookie,`/api/groups/${a}/invitations`,'POST',{email:`invite-${suffix}@example.invalid`},202);
+  await call(ownerA.cookie,`/api/groups/${a}/invitations`,'POST',{email:`invite-${suffix}@example.invalid`},429);
   await call(ownerB.cookie,'/api/groups','POST',{name:'  gRoUp   a  '},409);
   const listA=(await call(ownerA.cookie,'/api/groups')).data;
   assert.equal(listA.length,1);
@@ -55,6 +62,10 @@ try {
   const [teams]=await pool.query('SELECT id FROM teams ORDER BY id LIMIT 2');
   assert.equal(teams.length,2,'Import teams before running this integration test');
   const [game]=await pool.execute('INSERT INTO games (week_id,home_team_id,away_team_id,kickoff_at,is_monday_tiebreaker) VALUES (?,?,?,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 DAY),TRUE)',[weekId,teams[0].id,teams[1].id]);
+  await queueReminders(pool);
+  await queueReminders(pool);
+  const [reminders]=await pool.query("SELECT * FROM email_outbox WHERE week_id=? AND kind='reminder'",[weekId]);
+  assert.equal(reminders.filter(mail=>[a,b].includes(mail.group_id)).length,4,'One reminder per membership, even after repeated scans');
   async function save(groupId,teamId,tiebreaker=42) {
     return (await call(member.cookie,`/api/groups/${groupId}/weeks/${weekId}/entry`,'PUT',{picks:[{gameId:game.insertId,teamId}],tiebreakerTotal:tiebreaker})).data;
   }
@@ -73,6 +84,9 @@ try {
   await call(member.cookie,`/api/groups/${a}/entries/${entryA.id}/submit-review`,'POST');
   await call(ownerA.cookie,`/api/groups/${a}/reviews/${entryA.id}/approve`,'POST');
   await call(ownerB.cookie,`/api/groups/${b}/reviews/${entryB.id}/approve`,'POST');
+  const [decisions]=await pool.query("SELECT * FROM email_outbox WHERE user_id=? AND kind='pick_decision' ORDER BY id",[member.id]);
+  assert.equal(decisions.length,3,'Only successful decisions queue emails');
+  assert.ok(decisions[0].body.includes('Please check your tiebreaker'));
   assert.equal((await call(member.cookie,`/api/groups/${a}/weeks/${weekId}/leaderboard`)).data.length,1);
   assert.equal((await call(member.cookie,`/api/groups/${a}/weeks/${weekId}/leaderboard`)).data[0].tiebreakerTotal,null);
   const noticesA=(await call(member.cookie,`/api/groups/${a}/notifications`)).data;
@@ -87,6 +101,10 @@ try {
   assert.equal((await call(admin.cookie,`/api/admin/weeks/${weekId}/score`,'POST')).data.winners,2);
   const [results]=await pool.query('SELECT group_id,winning_correct_picks FROM weekly_results WHERE week_id=? ORDER BY group_id',[weekId]);
   assert.deepEqual(results.map(r=>r.winning_correct_picks),[1,0]);
+  await call(admin.cookie,`/api/admin/weeks/${weekId}/score`,'POST');
+  const [resultMail]=await pool.query("SELECT * FROM email_outbox WHERE week_id=? AND kind='results'",[weekId]);
+  assert.equal(resultMail.length,4,'Unchanged rescoring does not repeat results emails');
+  assert.ok(resultMail.every(mail=>mail.body.includes('Test member')));
   assert.ok((await call(admin.cookie,'/api/groups')).data.some(g=>g.id===a));
   await call(admin.cookie,`/api/groups/${b}/reviews`);
   await call(member.cookie,'/api/weeks','GET',undefined,404);
@@ -101,6 +119,7 @@ try {
   await call(member.cookie,`/api/groups/${a}/settings`,'PATCH',settings,403);
   await call(ownerB.cookie,`/api/groups/${a}/settings`,'PATCH',settings,403);
   await call(ownerA.cookie,`/api/groups/${a}/settings`,'PATCH',settings);
+  await call(ownerA.cookie,`/api/groups/${a}/invitations`,'POST',{email:`closed-${suffix}@example.invalid`},409);
   assert.equal((await call(ownerA.cookie,`/api/groups/${a}/reviews`)).data[0].entryId,pending.id);
   await call(member.cookie,`/api/groups/${a}/weeks/${weekId}/entry`,'PUT',{picks:[{gameId:game.insertId,teamId:teams[0].id}],tiebreakerTotal:42},409);
   await call(ownerB.cookie,'/api/groups/join','POST',{inviteCode:listA[0].inviteCode},409);
@@ -115,6 +134,7 @@ try {
   assert.equal((await call(ownerB.cookie,'/api/groups')).data.find(g=>g.id===b).requirePickApproval,1);
   console.log('PASS: commissioner self-submission, settings permissions, automatic member submission, pending queue preservation, entry limits, closed joining, invite rotation');
   console.log('PASS: create/join, roles, group isolation, review decisions, notifications, independent winners, admin oversight');
+  console.log('PASS: welcome emails, invitation permissions and cooldown, review emails, reminder deduplication, results recipients and rescoring deduplication');
 } finally {
   // Delete only fixtures whose IDs were created by this run.
   for (const id of groups) {

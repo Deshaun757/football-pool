@@ -15,6 +15,7 @@ import { reviewsRouter } from './routes/reviews.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireGroup } from './middleware/group.js';
 import { notificationsRouter } from './routes/notifications.js';
+import { supportRouter } from './routes/support.js';
 
 export const app = express();
 app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'https:'] } } }));
@@ -26,6 +27,7 @@ app.use(requireSameOrigin);
 app.get('/health', (_request, response) => response.json({ ok: true }));
 app.use('/team-badges', teamBadgesRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/support', supportRouter);
 app.use('/api/groups', groupsRouter);
 app.use('/api/groups/:groupId', requireAuth, requireGroup, entriesRouter, weeksRouter, reviewsRouter, notificationsRouter);
 app.use('/api', adminRouter);

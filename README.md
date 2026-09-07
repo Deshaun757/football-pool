@@ -48,6 +48,12 @@ Use Forgot password on the sign-in screen. Reset links expire after 30 minutes, 
 
 With local services running, `npm run test:password-reset` checks email delivery, token expiration, single use, and session invalidation using temporary fixtures.
 
+The app also queues welcome emails for new registrations, commissioner email invitations, pick approval/rejection notices (including rejection reasons), and weekly results for group members when the administrator scores a week. Commissioners send invitations from **Group commissioner → Invite a player**; recipients sign in or register and paste the supplied invite code in My groups. Joining must be enabled. Invitations are limited to 20 per group per hour, with a one-hour cooldown per recipient.
+
+Members without a submitted or pending-review entry receive one reminder per group/week during the 24 hours before an open week's deadline. Reminders require a scheduled game and are cancelled if the member submits, leaves, or the week closes before delivery. No historical registration emails are backfilled. Unchanged rescoring does not repeat results emails; changed scores can send updated results.
+
+Migration 010 creates `email_outbox` automatically on startup. A worker starts with the Node server and checks every minute, sending up to 10 queued messages per pass. Failed messages retry after five minutes, up to five attempts; exhausted attempts are logged with the queue item ID and retained for inspection. A database lock coordinates multiple app instances. SMTP delivery is at-least-once: a crash after SMTP acceptance but before recording success can duplicate a message. The server must remain running for reminders; expired reminders are skipped after downtime. Password reset emails still send immediately.
+
 ## Schedules and badges
 
 The app administrator can import a regular season from [nflverse](https://github.com/nflverse/nflverse-data) or upload its games.csv format. Repeated imports update schedules using stable external game IDs. Downloads require outbound internet access from the server. Schedule data is provided under nflverse's published CC-BY-4.0 license.

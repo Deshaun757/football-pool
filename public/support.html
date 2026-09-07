@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Support & privacy requests | Huddle Pick&#8217;em</title>
+    <link rel="icon" type="image/svg+xml" href="/huddle-icon.svg" />
+    <link rel="stylesheet" href="/legal.css" />
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/"
+        ><img src="/huddle-icon.svg" alt="" />Huddle Pick&#8217;em</a
+      >
+      <nav aria-label="Information pages">
+        <a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a
+        ><a href="/rules.html">Pool rules</a><a href="/cookies.html">Cookies</a
+        ><a href="/support.html">Support</a>
+      </nav>
+    </header>
+    <main>
+      <h1>Support & privacy requests</h1>
+      <p class="meta">
+        Last updated September 6, 2026 &#183; Version 2026-09-06
+      </p>
+      <p class="notice">
+        Huddle Pick&#8217;em is operated by <strong>Redcrows Solutions</strong>,
+        Norfolk, Virginia, United States. Contact
+        <a href="mailto:support@huddlepickem.com">support@huddlepickem.com</a>
+        for support, account access, privacy, or security concerns.
+      </p>
+      <h2>Getting help</h2>
+      <p>
+        For group approvals and settings, start with your commissioner. For app
+        problems, include your account email, group name, week and entry number
+        if relevant, what happened, and what you expected. Never send passwords,
+        session cookies, or password-reset links. If you cannot sign in, try
+        Forgot password or email support from your account address.
+      </p>
+      <h2>Privacy and account deletion</h2>
+      <p>
+        You may request access to your information, correction, account
+        deletion, or review of another privacy issue. Signed-in requests are
+        recorded below for the app administrator; you can also email support.
+        Deletion requires review and is not immediate. The operator may verify
+        identity, consider commissioner responsibilities, and explain any
+        records retained for other players&#8217; results, disputes, or
+        applicable obligations. Do not include sensitive documents unless
+        support explains a necessary verification step.
+      </p>
+      <p id="signin-note">
+        <a href="/">Sign in</a>, then return here to change email preferences or
+        submit and track a request. You do not need to join a group first.
+      </p>
+      <p id="page-message" role="status"></p>
+      <section id="signed-in-tools" hidden>
+        <form id="preferences">
+          <h2>Email preferences</h2>
+          <label
+            ><input id="reminders" type="checkbox" /> Send me picks-deadline
+            reminders</label
+          ><label
+            ><input id="results" type="checkbox" /> Send me weekly
+            results</label
+          >
+          <p>
+            These choices apply across your groups. Welcome, password-reset,
+            invitation, and pick-decision messages are separate service
+            messages. Messages already handed to your email provider cannot be
+            recalled.
+          </p>
+          <button>Save preferences</button>
+          <p id="preference-message" role="status"></p>
+        </form>
+        <form id="request-form">
+          <h2>Submit a request</h2>
+          <label
+            >Request type<select id="category">
+              <option value="support">App support</option>
+              <option value="access">Copy of my information</option>
+              <option value="correction">Correct my information</option>
+              <option value="deletion">Delete my account</option>
+              <option value="privacy">Other privacy concern</option>
+            </select></label
+          ><label
+            >Details<textarea
+              id="request-message"
+              rows="6"
+              minlength="10"
+              maxlength="4000"
+              required
+            ></textarea>
+          </label>
+          <p>
+            Submitting a deletion request does not immediately remove access or
+            delete records. Up to five requests per account per day.
+          </p>
+          <button>Submit request</button>
+          <p id="request-status" role="status"></p>
+        </form>
+        <h2>Your requests</h2>
+        <div id="my-requests"></div>
+      </section>
+      <section id="admin-tools" hidden>
+        <h2>Administrator request inbox</h2>
+        <p>
+          Review the request and contact the requester through the support
+          mailbox as needed. Perform and document the appropriate action before
+          marking resolved. This status control does not delete an account,
+          export data, or send a reply.
+        </p>
+        <p id="admin-message" role="status"></p>
+        <div id="admin-requests"></div>
+      </section>
+      <h2>Security and availability</h2>
+      <p>
+        Report suspected account access or exposed information privately by
+        email with a concise description. Avoid sending another player&#8217;s
+        personal information unnecessarily. Support is reviewed by the operator;
+        there is no staffed emergency or guaranteed instant-response channel.
+        For questions about deadlines, do not wait for an email before taking an
+        available in-app action.
+      </p>
+    </main>
+    <footer>
+      <span>Redcrows Solutions &#183; Norfolk, Virginia, United States</span
+      ><a href="mailto:support@huddlepickem.com">support@huddlepickem.com</a
+      ><a href="/">Return to app</a>
+    </footer>
+    <script type="module" src="/support.js"></script>
+  </body>
+</html>

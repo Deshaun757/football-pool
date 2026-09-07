@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { queuePickDecision } from '../services/email-outbox.js';
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
@@ -191,6 +192,7 @@ entriesRouter.post(
           ],
         );
       }
+      if (!needsReview) await queuePickDecision(connection,entryId,'approved');
       await connection.commit();
       response.json({ entryId, status });
     } catch (error) {

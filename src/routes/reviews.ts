@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { pool } from '../db/pool.js';
 import { requireCommissioner } from '../middleware/group.js';
 import { HttpError } from '../lib/http-error.js';
+import { queuePickDecision } from '../services/email-outbox.js';
 export const reviewsRouter = Router();
 reviewsRouter.use('/reviews', requireCommissioner);
 reviewsRouter.get("/reviews", async (request, response) => {
@@ -46,6 +47,7 @@ reviewsRouter.post(
        ON DUPLICATE KEY UPDATE message=VALUES(message),read_at=NULL,created_at=CURRENT_TIMESTAMP(3)`,
         [entryId],
       );
+      await queuePickDecision(connection,entryId,'approved');
       await connection.commit();
       response.json({ entryId, status: "submitted" });
     } catch (error) {
@@ -86,6 +88,7 @@ reviewsRouter.post(
        ON DUPLICATE KEY UPDATE message=VALUES(message),read_at=NULL,created_at=CURRENT_TIMESTAMP(3)`,
         [`Picks need changes: ${body.reason}`, entryId],
       );
+      await queuePickDecision(connection,entryId,'rejected',body.reason);
       await connection.commit();
       response.json({ entryId, status: "rejected" });
     } catch (error) {

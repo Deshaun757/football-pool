@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sunday Ticket Pick’em</title>
+    <title>Huddle Pick’em</title>
+    <link rel="icon" type="image/svg+xml" href="/huddle-icon.svg" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -19,12 +20,12 @@
         <span></span><span></span><span></span>
         <b id="review-count" hidden>0</b>
       </button>
-      <a class="brand" href="#">Sunday Ticket <span>Pick’em</span></a>
+      <a class="brand" href="/" aria-label="Huddle Pick’em home"><img class="brand-icon" src="/huddle-icon.svg" alt="" />Huddle <span>Pick’em</span></a>
       <nav id="nav"></nav>
     </header>
     <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
     <aside id="drawer" class="drawer" aria-hidden="true" inert>
-      <div class="drawer-brand">Sunday Ticket <span>Pick’em</span></div>
+      <div class="drawer-brand">Huddle <span>Pick’em</span></div>
       <nav class="drawer-nav">
         <button type="button" data-view="groups">My groups</button>
         <button type="button" data-view="home">Current picks</button>
@@ -37,6 +38,7 @@
           App administration
         </button>
       </nav>
+      <div class="drawer-footer"><button id="menu-logout" type="button">Log out</button><p id="logout-error" class="error" role="status"></p></div>
     </aside>
     <main>
       <section id="auth" class="auth-shell">
@@ -51,23 +53,24 @@
         <form id="auth-form" class="panel">
           <h2 id="auth-title">Welcome back</h2>
           <label id="name-label" hidden
-            >Display name<input id="display-name" autocomplete="name" /></label
+            ><span>Display name <span class="required-mark" aria-hidden="true">*</span></span><input id="display-name" autocomplete="name" minlength="2" maxlength="100" /></label
           ><label
-            >Email<input
+            ><span>Email <span class="required-mark" aria-hidden="true">*</span></span><input
               id="email"
               type="email"
               autocomplete="email"
               required /></label
           ><label
-            >Password<input
+            ><span>Password <span class="required-mark" aria-hidden="true">*</span></span><input
               id="password"
               type="password"
               minlength="10"
               autocomplete="current-password"
               required /></label
           >
-          <label id="confirm-password-label" hidden>Confirm password<input id="confirm-password" type="password" autocomplete="new-password" maxlength="128"></label>
+          <label id="confirm-password-label" hidden><span>Confirm password <span class="required-mark" aria-hidden="true">*</span></span><input id="confirm-password" type="password" autocomplete="new-password" maxlength="128"></label>
           <p id="password-help" class="meta" hidden>Use 10–128 characters, including uppercase, lowercase, a number, and a special character.</p>
+          <label id="terms-label" class="check" hidden><input id="accept-terms" type="checkbox"><span>I agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms of Use</a> and have read the <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>. <span class="required-mark" aria-hidden="true">*</span></span></label>
           <button class="primary" type="submit">Continue</button
           ><button id="auth-toggle" class="link" type="button">
             Need an account? Register
@@ -79,7 +82,7 @@
       <section id="dashboard" hidden>
         <div class="group-bar"><label>Current group<select id="group-select" aria-label="Current group"></select></label><button type="button" data-view="groups">Manage groups</button></div>
         <section id="groups-view" class="app-view page-view" hidden>
-          <div class="page-heading"><p class="eyebrow">Play together</p><h1>Your groups</h1><p>Create a group to become its commissioner, or join with an invite code.</p></div>
+          <div class="page-heading"><p class="eyebrow">Play together</p><h1>Your groups</h1><p>Create a group to become its commissioner, or join with an invite code. Join or create your first group to unlock the other tabs.</p></div>
           <div class="groups-forms">
             <form id="create-group-form" class="panel"><h2>Create a group</h2><label>Group name<input name="name" minlength="2" maxlength="100" required></label><button type="submit">Create group</button></form>
             <form id="join-group-form" class="panel"><h2>Join a group</h2><label>Invite code<input name="inviteCode" required autocomplete="off"></label><button type="submit">Join group</button></form>
@@ -169,6 +172,12 @@
           <div id="leaderboard"></div>
         </section>
         <section id="reviews-view" class="app-view page-view" hidden>
+          <form id="group-invite-form" class="panel group-members">
+            <h2>Invite a player</h2>
+            <label>Email address <input name="email" type="email" autocomplete="email" maxlength="320" required></label>
+            <button type="submit">Email invitation</button>
+            <p id="invite-message" role="status"></p>
+          </form>
           <form id="group-settings-form" class="panel group-members">
             <h2>Group settings</h2>
             <label class="check"><input name="requirePickApproval" type="checkbox"> Require approval for member picks</label>
@@ -341,6 +350,7 @@
         </nav>
       </section>
     </main>
+    <footer class="site-footer"><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/rules.html">Pool rules</a><a href="/cookies.html">Cookies</a><a href="/support.html">Support &amp; privacy requests</a></footer>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

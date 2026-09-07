@@ -9,6 +9,7 @@ pool.query = async () => { checked = true; return [[], []]; };
 let migrationsChecked = false;
 pool.getConnection = async () => ({
   query: async sql => {
+    if (sql.includes("CONCAT('mail:'")) return [[{acquired:0}],[]];
     if (sql.includes('GET_LOCK')) return [[{ acquired: 1 }], []];
     if (sql === 'SELECT filename FROM schema_migrations') {
       migrationsChecked = true;
