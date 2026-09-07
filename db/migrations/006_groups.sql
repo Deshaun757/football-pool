@@ -17,10 +17,11 @@ CREATE TABLE IF NOT EXISTS group_members (
   CONSTRAINT members_user_fk FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
--- Preserve the original pool and all existing entries and memberships.
+-- Preserve a pre-existing pool during upgrades; fresh databases stay empty.
 INSERT IGNORE INTO pool_groups (id,name,invite_code,created_by)
-VALUES (1,'Original pool',LOWER(HEX(RANDOM_BYTES(16))),
-  (SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1));
+SELECT 1,'Original pool',LOWER(HEX(RANDOM_BYTES(16))),
+  (SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1)
+WHERE EXISTS (SELECT 1 FROM users) OR EXISTS (SELECT 1 FROM weekly_results);
 INSERT IGNORE INTO group_members (group_id,user_id,role)
 SELECT 1,u.id,IF(u.id=g.created_by,'commissioner','member')
 FROM users u CROSS JOIN pool_groups g WHERE g.id=1;

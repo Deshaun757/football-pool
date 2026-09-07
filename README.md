@@ -6,10 +6,22 @@ A Node.js/TypeScript and MySQL 8.4 football pick’em pool. Players submit ballo
 
 1. Copy `.env.example` to `.env`. Set `ADMIN_EMAIL` before registering the app administrator account.
 2. Run `docker compose up -d mysql` and wait for MySQL to become healthy.
-3. Run `npm install`, `npm run db:migrate`, then `npm run dev`.
+3. Run `npm install`, then `npm run dev`. Pending database migrations run automatically before the server starts.
 4. Open http://localhost:3000, register, and import a schedule from App administration.
 
 For compiled operation, run `npm run build` and `npm start`. Run tests with `npm test`.
+
+## Automatic migrations and deployment
+
+Fresh deployments create empty application tables, plus migration-history records. Startup never runs demo seeding or copies data from another environment. Original pool is created only when upgrading a database that already contains users or results. Demo seeding is an explicit local command and is blocked when NODE_ENV=production. Existing records in an already-deployed database are not deleted.
+
+Every startup checks `schema_migrations` and applies missing SQL files in order, under a database advisory lock. Existing data is preserved by the current migrations. Concurrent app instances wait for the same lock. Include the repository's `db/migrations` directory with the deployment; its location is resolved relative to the application files, not the shell's working directory.
+
+Hostinger settings remain build `npm run build`, entry `dist/server.js`, and start `npm start`. Set the production `MYSQL_URL` before deployment; its user needs permission to create and alter tables. No separate Flyway installation or manual SSH migration command is required. `node dist/db/migrate.js` remains available for manual use after building.
+
+Migrations support MySQL 8 and detect MariaDB's UCA 1400 accent-sensitive, case-insensitive collation when available. Unsupported group-name collations stop initialization before application tables are changed. Compatibility must still be confirmed for the database version in your hosting account.
+
+MySQL/MariaDB DDL is not transactionally rolled back. An interrupted migration is marked in `schema_migration_failures` and blocks automatic retry. Repair/complete that migration and reconcile its history before clearing the marker; do not blindly remove it. Runtime logs identify failed migration filenames and database error codes without printing connection credentials.
 
 After importing teams, `npm run db:seed-demo` creates a labeled completed demo week with fictional players, picks, and results. Demo accounts cannot log in.
 

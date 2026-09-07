@@ -1,6 +1,11 @@
 import type { RowDataPacket } from 'mysql2';
 import { pool } from './pool.js';
+import { config } from '../config.js';
 import { scoreWeek } from '../services/score-week.js';
+
+if (config.NODE_ENV === 'production') {
+  throw new Error('Demo seeding is disabled in production');
+}
 
 type IdRow = RowDataPacket & { id: number; abbreviation?: string; email?: string };
 
