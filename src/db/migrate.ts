@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { RowDataPacket } from 'mysql2';
 import { pool } from './pool.js';
+import { logger } from '../lib/logger.js';
 
 export async function migrateDatabase(): Promise<void> {
   const directory = fileURLToPath(new URL('../../db/migrations/', import.meta.url));
@@ -46,13 +47,13 @@ export async function migrateDatabase(): Promise<void> {
         await connection.query(sql);
         await connection.execute('INSERT INTO schema_migrations (filename) VALUES (?)',[filename]);
         await connection.execute('DELETE FROM schema_migration_failures WHERE filename=?',[filename]);
-        console.log(`Applied ${filename}`);
+        logger.info('database_migration_applied', { filename });
       } catch (error) {
         const code = (error as {code?:string}).code ?? 'UNKNOWN';
         throw new Error(`Migration ${filename} failed (${code}). Inspect the schema before retrying.`);
       }
     }
-    console.log(`Database migrations complete (${pending.length} applied)`);
+    logger.info('database_migrations_complete', { applied: pending.length, total: filenames.length });
   } finally {
     try {
       if (locked) await connection.query("SELECT RELEASE_LOCK(CONCAT('pickem:', LEFT(SHA2(DATABASE(),256),48)))");
@@ -63,7 +64,7 @@ export async function migrateDatabase(): Promise<void> {
 // Keep both imports and Hostinger's require() loader synchronous.
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   void migrateDatabase().catch(error => {
-    console.error(error instanceof Error ? error.message : 'Database migration failed');
+    logger.error('database_migration_cli_failed', { message: error instanceof Error ? error.message : 'Database migration failed' });
     process.exitCode = 1;
   }).finally(() => pool.end());
 }

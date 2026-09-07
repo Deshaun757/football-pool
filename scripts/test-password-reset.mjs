@@ -8,13 +8,21 @@ const base=`http://127.0.0.1:${server.address().port}`;
 const email=`reset-${randomBytes(6).toString('hex')}@example.invalid`;
 let userId,mailId;
 async function post(path,body){return fetch(base+'/api/auth/'+path,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});}
+async function patch(path,body,cookie){return fetch(base+'/api/auth/'+path,{method:'PATCH',headers:{'content-type':'application/json',cookie},body:JSON.stringify(body)});}
 try{
   const password='Abcdefg1!x';
   assert.equal((await post('register',{acceptTerms:true,email,displayName:'Reset test',password,confirmPassword:'no'})).status,400);
+  assert.equal((await post('register',{acceptTerms:true,email:'reserved-'+email,displayName:'Admin',password,confirmPassword:password})).status,400);
+  assert.equal((await post('register',{acceptTerms:true,email:'url-'+email,displayName:'bad.example.com',password,confirmPassword:password})).status,400);
+  assert.equal((await post('register',{acceptTerms:true,email:'script-'+email,displayName:'Bad<script>',password,confirmPassword:password})).status,400);
   const registration=await post('register',{acceptTerms:true,email,displayName:'Reset test',password,confirmPassword:password});
   assert.equal(registration.status,201);
   userId=(await registration.json()).id;
   const cookie=registration.headers.get('set-cookie').split(';')[0];
+  assert.equal((await patch('me',{displayName:'Support'},cookie)).status,400);
+  const profileUpdate=await patch('me',{displayName:'Updated Name'},cookie);
+  assert.equal(profileUpdate.status,200);
+  assert.equal((await profileUpdate.json()).displayName,'Updated Name');
   const known=await post('forgot-password',{email});
   const unknown=await post('forgot-password',{email:'missing-'+email});
   assert.equal(known.status,200);assert.deepEqual(await known.json(),await unknown.json());
@@ -36,7 +44,7 @@ try{
   const expired=randomBytes(32).toString('hex');
   await pool.execute('INSERT INTO password_resets (user_id,token_hash,expires_at) VALUES (?,?,DATE_SUB(UTC_TIMESTAMP(),INTERVAL 1 MINUTE))',[userId,createHash('sha256').update(expired).digest()]);
   assert.equal((await post('reset-password',{token:expired,password:next,confirmPassword:next})).status,400);
-  console.log('PASS: confirmation, 10-character password, MailHog delivery, hashed tokens, single-use concurrency, expiration, session invalidation, new login');
+  console.log('PASS: confirmation, 10-character password, display-name rules and updates, MailHog delivery, hashed tokens, single-use concurrency, expiration, session invalidation, new login');
 }finally{
   if(userId){await pool.execute('DELETE FROM sessions WHERE user_id=?',[userId]);await pool.execute('DELETE FROM users WHERE id=?',[userId]);}
   if(mailId) await fetch('http://localhost:8025/api/v1/messages/'+mailId,{method:'DELETE'});

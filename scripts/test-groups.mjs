@@ -33,6 +33,10 @@ try {
   const a=await create(ownerA,'Group A'), b=await create(ownerB,'Group B');
   const [welcome]=await pool.query("SELECT * FROM email_outbox WHERE user_id=? AND kind='welcome'",[member.id]);
   assert.equal(welcome.length,1);
+  await call(ownerA.cookie,'/api/groups','POST',{name:'Admin'},400);
+  await call(ownerA.cookie,'/api/groups','POST',{name:'bad.example.com'},400);
+  await call(ownerA.cookie,'/api/groups','POST',{name:'bad<script>'},400);
+  await call(ownerA.cookie,'/api/groups','POST',{name:'a'.repeat(32)},400);
   await call(member.cookie,`/api/groups/${a}/invitations`,'POST',{email:'invite@example.invalid'},403);
   await call(ownerA.cookie,`/api/groups/${a}/invitations`,'POST',{email:'invalid'},400);
   await call(ownerA.cookie,`/api/groups/${a}/invitations`,'POST',{email:`invite-${suffix}@example.invalid`},202);
@@ -94,6 +98,12 @@ try {
   await call(member.cookie,`/api/groups/${b}/entries/${entryA.id}/submit-review`,'POST',undefined,409);
   await call(member.cookie,`/api/groups/${b}/weeks/${weekId}/entry`,'PUT',{entryId:entryA.id,picks:[{gameId:game.insertId,teamId:teams[0].id}],tiebreakerTotal:42},409);
   for (const [id,entry] of [[a,entryA],[b,entryB]]) await call(member.cookie,`/api/groups/${id}/entries/${entry.id}/submit-review`,'POST');
+  const [reviewRequests]=await pool.query("SELECT recipient,body FROM email_outbox WHERE kind='pick_review_requested' AND group_id IN (?,?) ORDER BY group_id",[a,b]);
+  assert.equal(reviewRequests.length,2,'Pending member entries queue review-request emails to commissioners');
+  assert.deepEqual(reviewRequests.map(mail=>mail.recipient).sort(),[ownerA.email,ownerB.email].sort());
+  assert.ok(reviewRequests.every(mail=>mail.body.includes(member.displayName)));
+  assert.ok(reviewRequests.some(mail=>mail.body.includes('Group A')));
+  assert.ok(reviewRequests.some(mail=>mail.body.includes('Group B')));
   assert.equal((await call(ownerA.cookie,`/api/groups/${a}/reviews`)).data.length,1);
   assert.equal((await call(ownerA.cookie,`/api/groups/${a}/notifications`)).data.unreadCount,1);
   await call(ownerA.cookie,`/api/groups/${a}/reviews/${entryB.id}/approve`,'POST',undefined,409);
@@ -101,6 +111,8 @@ try {
   await call(member.cookie,`/api/groups/${a}/reviews/${entryA.id}/approve`,'POST',undefined,403);
   await call(ownerA.cookie,`/api/groups/${a}/reviews/${entryA.id}/reject`,'POST',{reason:'Please check your tiebreaker'});
   await call(member.cookie,`/api/groups/${a}/entries/${entryA.id}/submit-review`,'POST');
+  const [resubmissionRequests]=await pool.query("SELECT id FROM email_outbox WHERE kind='pick_review_requested' AND group_id=? AND user_id=?",[a,ownerA.id]);
+  assert.equal(resubmissionRequests.length,2,'Rejected entries queue another review-request email when resubmitted');
   await call(ownerA.cookie,`/api/groups/${a}/reviews/${entryA.id}/approve`,'POST');
   await call(ownerB.cookie,`/api/groups/${b}/reviews/${entryB.id}/approve`,'POST');
   const [decisions]=await pool.query("SELECT * FROM email_outbox WHERE user_id=? AND kind='pick_decision' ORDER BY id",[member.id]);
@@ -141,10 +153,12 @@ try {
   assert.equal((await call(ownerA.cookie,`/api/groups/${a}/entries/${ownerEntry.id}/submit-review`,'POST')).data.status,'submitted');
   const pending=await save(a,teams[0].id);
   await call(member.cookie,`/api/groups/${a}/entries/${pending.id}/submit-review`,'POST');
-  const settings={requirePickApproval:false,allowMultipleEntries:false,joiningEnabled:false};
+  const settings={requirePickApproval:false,maxEntriesPerMember:1,reviewSubmissionMessage:'Review carefully before sending this test entry.',joiningEnabled:false};
   await call(member.cookie,`/api/groups/${a}/settings`,'PATCH',settings,403);
   await call(ownerB.cookie,`/api/groups/${a}/settings`,'PATCH',settings,403);
   await call(ownerA.cookie,`/api/groups/${a}/settings`,'PATCH',settings);
+  await call(ownerA.cookie,`/api/groups/${a}/settings`,'PATCH',{...settings,maxEntriesPerMember:0},400);
+  await call(ownerA.cookie,`/api/groups/${a}/settings`,'PATCH',{...settings,maxEntriesPerMember:11},400);
   await call(ownerA.cookie,`/api/groups/${a}/invitations`,'POST',{email:`closed-${suffix}@example.invalid`},409);
   assert.equal((await call(ownerA.cookie,`/api/groups/${a}/reviews`)).data[0].entryId,pending.id);
   await call(member.cookie,`/api/groups/${a}/weeks/${weekId}/entry`,'PUT',{picks:[{gameId:game.insertId,teamId:teams[0].id}],tiebreakerTotal:42},409);
@@ -152,12 +166,15 @@ try {
   await call(member.cookie,'/api/groups/join','POST',{inviteCode:listA[0].inviteCode});
   await call(member.cookie,`/api/groups/${a}/invite-code`,'POST',undefined,403);
   const rotated=(await call(ownerA.cookie,`/api/groups/${a}/invite-code`,'POST')).data.inviteCode;
-  await call(ownerA.cookie,`/api/groups/${a}/settings`,'PATCH',{...settings,allowMultipleEntries:true,joiningEnabled:true});
+  await call(ownerA.cookie,`/api/groups/${a}/settings`,'PATCH',{...settings,requirePickApproval:true,maxEntriesPerMember:3,joiningEnabled:true});
   await call(ownerB.cookie,'/api/groups/join','POST',{inviteCode:listA[0].inviteCode},404);
   await call(ownerB.cookie,'/api/groups/join','POST',{inviteCode:rotated});
   const automatic=await save(a,teams[0].id);
-  assert.equal((await call(member.cookie,`/api/groups/${a}/entries/${automatic.id}/submit-review`,'POST')).data.status,'submitted');
+  const reviewSubmission=(await call(member.cookie,`/api/groups/${a}/entries/${automatic.id}/submit-review`,'POST')).data;
+  assert.equal(reviewSubmission.status,'pending_review');
+  assert.equal(reviewSubmission.reviewSubmissionMessage,settings.reviewSubmissionMessage);
   assert.equal((await call(ownerB.cookie,'/api/groups')).data.find(g=>g.id===b).requirePickApproval,1);
+  assert.equal((await call(ownerA.cookie,'/api/groups')).data.find(g=>g.id===a).maxEntriesPerMember,3);
   console.log('PASS: commissioner self-submission, settings permissions, automatic member submission, pending queue preservation, entry limits, closed joining, invite rotation');
   console.log('PASS: create/join, roles, group isolation, review decisions, notifications, independent winners, admin oversight');
   await call(ownerA.cookie,`/api/groups/${a}/members/${member.id}`,'DELETE');
@@ -167,7 +184,7 @@ try {
   assert.ok(preserved.length>0);
   await call(ownerA.cookie,`/api/groups/${a}/members/${member.id}`,'DELETE',undefined,404);
   console.log('PASS: commissioner-only email visibility and removal, commissioner protection, preserved entries, revoked group access and unaffected other memberships');
-  console.log('PASS: welcome emails, invitation permissions and cooldown, review emails, reminder deduplication, results recipients and rescoring deduplication');
+  console.log('PASS: welcome emails, name validation, invitation permissions and cooldown, review emails, reminder deduplication, results recipients and rescoring deduplication');
 } finally {
   // Delete only fixtures whose IDs were created by this run.
   for (const id of groups) {

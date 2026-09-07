@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { resolve } from 'node:path';
 import { ZodError } from 'zod';
 import { HttpError } from './lib/http-error.js';
+import { errorFields, logger } from './lib/logger.js';
 import { requireSameOrigin } from './middleware/same-origin.js';
 import { adminRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
@@ -20,6 +21,22 @@ import { supportRouter } from './routes/support.js';
 export const app = express();
 app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'https:'] } } }));
 app.use(cors());
+app.use((request, response, next) => {
+  const startedAt = performance.now();
+  response.on('finish', () => {
+    const durationMs = Math.round(performance.now() - startedAt);
+    const level = response.statusCode >= 500 ? 'error' : response.statusCode >= 400 || durationMs > 1000 ? 'warn' : 'info';
+    logger[level]('http_request', {
+      method: request.method,
+      path: request.path,
+      status: response.statusCode,
+      durationMs,
+      userId: request.userId,
+      groupId: request.groupId,
+    });
+  });
+  next();
+});
 
 app.use(express.json({ limit: '5mb' }));
 app.use(requireSameOrigin);
@@ -40,9 +57,15 @@ app.get(/.*/, (_request, response) => {
   response.sendFile(resolve('public/index.html'));
 });
 
-app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+app.use((error: unknown, request: express.Request, response: express.Response, _next: express.NextFunction) => {
   if (error instanceof HttpError) { response.status(error.status).json({ error: error.message }); return; }
   if (error instanceof ZodError) { response.status(400).json({ error: 'Invalid request', details: error.issues }); return; }
-  console.error(error);
+  logger.error('unhandled_request_error', {
+    ...errorFields(error),
+    method: request.method,
+    path: request.path,
+    userId: request.userId,
+    groupId: request.groupId,
+  });
   response.status(500).json({ error: 'Internal server error' });
 });

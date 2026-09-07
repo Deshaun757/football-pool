@@ -8,6 +8,7 @@ import { requireGroup, requireCommissioner } from '../middleware/group.js';
 import { HttpError } from '../lib/http-error.js';
 import { queueEmail } from '../services/email-outbox.js';
 import { config } from '../config.js';
+import { groupNameSchema } from '../lib/name-policy.js';
 
 export const groupsRouter = Router();
 groupsRouter.use(requireAuth);
@@ -15,7 +16,8 @@ groupsRouter.use(requireAuth);
 groupsRouter.get('/', async (request,response) => {
   const [rows] = await pool.query(
     `SELECT g.id,g.name,m.role, u.display_name AS commissionerName,
-      g.require_pick_approval AS requirePickApproval,g.allow_multiple_entries AS allowMultipleEntries,g.joining_enabled AS joiningEnabled,
+      g.require_pick_approval AS requirePickApproval,g.allow_multiple_entries AS allowMultipleEntries,
+      g.max_entries_per_member AS maxEntriesPerMember,g.review_submission_message AS reviewSubmissionMessage,g.joining_enabled AS joiningEnabled,
       CASE WHEN m.role='commissioner' OR ?='admin' THEN g.invite_code ELSE NULL END AS inviteCode,
       (SELECT COUNT(*) FROM group_members WHERE group_id=g.id) AS memberCount
      FROM pool_groups g LEFT JOIN group_members m ON m.group_id=g.id AND m.user_id=?
@@ -27,7 +29,7 @@ groupsRouter.get('/', async (request,response) => {
 });
 
 groupsRouter.post('/', async (request,response) => {
-  const {name} = z.object({name:z.string().transform(value => value.trim().replace(/\s+/g, ' ')).pipe(z.string().min(2).max(100))}).parse(request.body);
+  const {name} = z.object({name:groupNameSchema}).parse(request.body);
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
@@ -78,10 +80,15 @@ groupsRouter.post('/join', async (request,response) => {
 });
 
 groupsRouter.patch('/:groupId/settings', requireGroup, requireCommissioner, async (request,response) => {
-  const settings=z.object({requirePickApproval:z.boolean(),allowMultipleEntries:z.boolean(),joiningEnabled:z.boolean()}).parse(request.body);
-  await pool.execute('UPDATE pool_groups SET require_pick_approval=?,allow_multiple_entries=?,joining_enabled=? WHERE id=?',
-    [settings.requirePickApproval,settings.allowMultipleEntries,settings.joiningEnabled,request.groupId!]);
-  response.json(settings);
+  const settings=z.object({
+    requirePickApproval:z.boolean(),
+    maxEntriesPerMember:z.number().int().min(1).max(10),
+    reviewSubmissionMessage:z.string().trim().max(500).optional().transform(value=>value || null),
+    joiningEnabled:z.boolean(),
+  }).parse(request.body);
+  await pool.execute('UPDATE pool_groups SET require_pick_approval=?,allow_multiple_entries=?,max_entries_per_member=?,review_submission_message=?,joining_enabled=? WHERE id=?',
+    [settings.requirePickApproval,settings.maxEntriesPerMember > 1,settings.maxEntriesPerMember,settings.reviewSubmissionMessage,settings.joiningEnabled,request.groupId!]);
+  response.json({...settings,allowMultipleEntries:settings.maxEntriesPerMember > 1});
 });
 
 groupsRouter.post('/:groupId/invite-code', requireGroup, requireCommissioner, async (request,response) => {

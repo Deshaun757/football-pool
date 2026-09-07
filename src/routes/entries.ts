@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { queuePickDecision } from '../services/email-outbox.js';
+import { queuePickDecision, queuePickReviewRequested } from '../services/email-outbox.js';
 import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
@@ -49,7 +49,7 @@ entriesRouter.put("/weeks/:weekId/entry", async (request, response) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [settings] = await connection.query<RowDataPacket[]>('SELECT allow_multiple_entries FROM pool_groups WHERE id=? FOR UPDATE',[request.groupId!]);
+    const [settings] = await connection.query<RowDataPacket[]>('SELECT max_entries_per_member FROM pool_groups WHERE id=? FOR UPDATE',[request.groupId!]);
     const [weeks] = await connection.query<WeekRow[]>(
       "SELECT id, status, picks_lock_at FROM weeks WHERE id = ? FOR UPDATE",
       [weekId],
@@ -60,7 +60,7 @@ entriesRouter.put("/weeks/:weekId/entry", async (request, response) => {
     await requirePreviousWeeksFinal(connection,weekId);
 
     const [games] = await connection.query<GameRow[]>(
-      "SELECT id, home_team_id, away_team_id FROM games WHERE week_id = ? AND status = 'scheduled'",
+      "SELECT id, home_team_id, away_team_id FROM games WHERE week_id = ?",
       [weekId],
     );
     validatePicks(
@@ -94,8 +94,9 @@ entriesRouter.put("/weeks/:weekId/entry", async (request, response) => {
         [userId, weekId, request.groupId!],
       );
       const entryNumber = Number(numberRows[0]?.next_number ?? 1);
-      if (!settings[0]?.allow_multiple_entries && entryNumber > 1)
-        throw new HttpError(409, 'This group allows one entry per player per week');
+      const maxEntriesPerMember = Number(settings[0]?.max_entries_per_member ?? 1);
+      if (entryNumber > maxEntriesPerMember)
+        throw new HttpError(409, `This group allows ${maxEntriesPerMember} ${maxEntriesPerMember === 1 ? 'entry' : 'entries'} per player each week`);
       const [result] = await connection.execute<ResultSetHeader>(
         "INSERT INTO entries (user_id,week_id,entry_number,tiebreaker_total,group_id) VALUES (?,?,?,?,?)",
         [userId, weekId, entryNumber, body.tiebreakerTotal, request.groupId!],
@@ -145,7 +146,7 @@ entriesRouter.post(
     const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
-      const [settings] = await connection.query<RowDataPacket[]>('SELECT require_pick_approval FROM pool_groups WHERE id=? FOR UPDATE',[request.groupId!]);
+      const [settings] = await connection.query<RowDataPacket[]>('SELECT require_pick_approval,review_submission_message FROM pool_groups WHERE id=? FOR UPDATE',[request.groupId!]);
       const [entries] = await connection.query<
         (EntryRow & { week_name: string })[]
       >(
@@ -195,9 +196,10 @@ entriesRouter.post(
           ],
         );
       }
-      if (!needsReview) await queuePickDecision(connection,entryId,'approved');
+      if (needsReview) await queuePickReviewRequested(connection,entryId);
+      else await queuePickDecision(connection,entryId,'approved');
       await connection.commit();
-      response.json({ entryId, status });
+      response.json({ entryId, status, reviewSubmissionMessage: needsReview ? settings[0]?.review_submission_message ?? null : null });
     } catch (error) {
       await connection.rollback();
       throw error;

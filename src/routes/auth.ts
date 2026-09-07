@@ -9,12 +9,14 @@ import { HttpError } from '../lib/http-error.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { requireAuth } from '../middleware/auth.js';
 import { passwordPair } from '../lib/password-policy.js';
+import { displayNameSchema } from '../lib/name-policy.js';
 import { sendPasswordReset } from '../services/email.js';
 import { queueEmail } from '../services/email-outbox.js';
 import { rateLimit } from 'express-rate-limit';
+import { errorFields, logger } from '../lib/logger.js';
 
 const credentials = z.object({ email: z.string().email().max(320).transform((v) => v.toLowerCase()), password: z.string().min(10).max(200) });
-const registerSchema = passwordPair.safeExtend({email:credentials.shape.email, displayName: z.string().trim().min(2).max(100), acceptTerms:z.literal(true) });
+const registerSchema = passwordPair.safeExtend({email:credentials.shape.email, displayName: displayNameSchema, acceptTerms:z.literal(true) });
 type UserRow = RowDataPacket & { id: number; email: string; display_name: string; password_hash: string | null; role: 'player' | 'admin' };
 
 export const authRouter = Router();
@@ -41,7 +43,7 @@ authRouter.post('/forgot-password', recoveryLimit, async (request,response)=>{
   } catch(error) {
     await connection.rollback();
     // Never log reset links or reveal whether an email belongs to an account.
-    console.error('Password recovery could not be completed. Check database and SMTP availability.');
+    logger.error('password_recovery_failed', errorFields(error));
   } finally { connection.release(); }
   response.json({message:recoveryMessage});
 });
@@ -117,6 +119,14 @@ authRouter.post('/logout', requireAuth, async (request, response) => {
   if (token) await pool.execute('DELETE FROM sessions WHERE token_hash = ?', [createHash('sha256').update(token).digest()]);
   response.clearCookie(config.SESSION_COOKIE_NAME, { path: '/' });
   response.status(204).end();
+});
+
+authRouter.patch('/me', requireAuth, async (request, response) => {
+  const {displayName} = z.object({displayName: displayNameSchema}).parse(request.body);
+  await pool.execute('UPDATE users SET display_name=? WHERE id=?', [displayName, request.userId!]);
+  const [rows] = await pool.query<UserRow[]>('SELECT id, email, display_name, role FROM users WHERE id = ?', [request.userId!]);
+  const user = rows[0]!;
+  response.json({ id: user.id, email: user.email, displayName: user.display_name, role: user.role });
 });
 
 // A logged-out or expired session is a normal result of the browser's session check.

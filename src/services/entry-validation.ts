@@ -10,7 +10,7 @@ export type PickInput = { gameId: number; teamId: number };
 
 export function validatePicks(games: GameForPick[], picks: PickInput[]): void {
   if (games.length === 0) throw new HttpError(409, 'This week has no games');
-  if (picks.length !== games.length) throw new HttpError(400, 'A pick is required for every game');
+  if (picks.length !== games.length) throw new HttpError(400, `A pick is required for every game. Received ${picks.length} picks for ${games.length} games.`);
 
   const byGame = new Map(games.map((game) => [game.id, game]));
   const seen = new Set<number>();

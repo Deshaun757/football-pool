@@ -28,10 +28,13 @@ let activeGroup = null;
 let groups = [];
 const needsPickReview = () => !!activeGroup?.requirePickApproval && activeGroup?.role !== 'commissioner';
 const canReview = () => !!activeGroup && (activeGroup.role === 'commissioner' || me?.role === 'admin');
+const maxEntriesForActiveGroup = () => Number(activeGroup?.maxEntriesPerMember ?? (activeGroup?.allowMultipleEntries ? 10 : 1));
 let weeksData = [];
 let myEntriesData = [];
 let activeView = "home";
 let weekReturnView = "place-picks";
+let pendingReviewHighlightEntryId = null;
+let settingsMessageTimer = null;
 const esc = (value) =>
   String(value).replace(
     /[&<>'"]/g,
@@ -40,6 +43,45 @@ const esc = (value) =>
         char
       ],
   );
+const reservedNames = new Set([
+  "admin",
+  "administrator",
+  "commissioner",
+  "commish",
+  "huddle pickem",
+  "huddlepickem",
+  "huddle pick em",
+  "huddle",
+  "support",
+]);
+function cleanName(value) {
+  return value.trim().replace(/\s+/g, " ");
+}
+function validateName(value, label, minimum, maximum) {
+  const name = cleanName(value);
+  if (name.length < minimum) throw new Error(`${label} must be at least ${minimum} characters.`);
+  if (name.length > maximum) throw new Error(`${label} must be ${maximum} characters or fewer.`);
+  if (!/^[A-Za-z0-9 .&'-]+$/.test(name)) throw new Error(`${label} can only use letters, numbers, spaces, apostrophes, hyphens, periods, and ampersands.`);
+  if (/[.@][^\s]*\.[^\s]+/.test(name) || /(?:https?:\/\/|www\.)/i.test(name)) throw new Error(`${label} cannot be an email address or website.`);
+  if (/^[a-f0-9]{24,}$/i.test(name)) throw new Error(`${label} cannot look like an invite code.`);
+  if (reservedNames.has(name.toLowerCase().replace(/\s+/g, " "))) throw new Error(`${label} is reserved. Please choose another name.`);
+  return name;
+}
+function showSettingsMessage(message, autoClear = false) {
+  $('#settings-message').textContent = message;
+  if (settingsMessageTimer) clearTimeout(settingsMessageTimer);
+  settingsMessageTimer = null;
+  if (autoClear) {
+    settingsMessageTimer = setTimeout(() => {
+      $('#settings-message').textContent = '';
+      settingsMessageTimer = null;
+    }, 5000);
+  }
+}
+function updateReviewMessageCount() {
+  const value = $('#group-settings-form').elements.reviewSubmissionMessage.value;
+  $('#review-message-count').textContent = `${value.length} / 500`;
+}
 
 async function api(path, options = {}) {
   if (/^\/api\/(weeks|entries|my-entries|picks-board|reviews|notifications)(\/|$)/.test(path)) {
@@ -90,7 +132,11 @@ const easternTime = (value) =>
   }).format(new Date(value));
 
 async function boot() {
-  if (location.pathname === "/reset-password") { configureAuth(); return; }
+  if (location.pathname === "/reset-password") {
+    configureAuth();
+    $("#auth").hidden = false;
+    return;
+  }
   try {
     me = await api("/api/auth/me");
     if (me) await showDashboard();
@@ -157,7 +203,7 @@ $('#auth-form').onsubmit = async event => {
       return;
     }
     if (registerMode) {
-      body.displayName = $('#display-name').value;
+      body.displayName = validateName($('#display-name').value, 'Display name', 2, 40);
       body.acceptTerms = $('#accept-terms').checked;
     }
     me = await api('/api/auth/' + (registerMode ? 'register' : 'login'),{method:'POST',body:JSON.stringify(body)});
@@ -258,7 +304,25 @@ function showView(view) {
 
 function renderAccount() {
   $("#account-card").innerHTML =
-    `<dl class="account-details"><div><dt>Display name</dt><dd>${esc(me.displayName)}</dd></div><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl><p><a href="/support.html">Email preferences, support &amp; privacy requests</a></p>`;
+    `<form id="account-profile-form"><label>Display name<input name="displayName" autocomplete="name" minlength="2" maxlength="40" pattern="[A-Za-z0-9 .&'-]+" title="Use 2-40 characters: letters, numbers, spaces, apostrophes, hyphens, periods, and ampersands." required value="${esc(me.displayName)}"></label><button type="submit">Save display name</button><p id="account-message" role="status"></p></form><dl class="account-details"><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl><p><a href="/support.html">Email preferences, support &amp; privacy requests</a></p>`;
+  $("#account-profile-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const button = event.target.querySelector("button");
+    button.disabled = true;
+    $("#account-message").textContent = "";
+    try {
+      const displayName = validateName(event.target.elements.displayName.value, "Display name", 2, 40);
+      me = await api("/api/auth/me", { method: "PATCH", body: JSON.stringify({ displayName }) });
+      $("#nav").innerHTML = `<span>${esc(me.displayName)}</span>`;
+      event.target.elements.displayName.value = me.displayName;
+      $("#account-message").textContent = "Display name saved.";
+      await loadGroups();
+    } catch (error) {
+      $("#account-message").textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
   $("#menu-logout").onclick = async (event) => {
     event.currentTarget.disabled = true;
     $("#logout-error").textContent = "";
@@ -281,8 +345,8 @@ async function loadPicksBoard() {
     board.games.sort(
       (a, b) => new Date(a.kickoffAt) - new Date(b.kickoffAt) || a.id - b.id,
     );
-    const poolWeekName = board.poolWeek?.name ?? "Upcoming week";
-    $("#pool-card").innerHTML = `<div><p class="eyebrow">${esc(poolWeekName)} entries</p><h2>${board.pool.approvedEntries} approved ${board.pool.approvedEntries === 1 ? "entry" : "entries"}</h2><p class="pool-detail">Picks appear publicly only after commissioner approval and the weekly lock</p></div><strong class="pool-amount">✓</strong>`;
+    const poolWeekName = board.poolWeek?.name ?? board.displayWeek?.name ?? "Weekly picks";
+    $("#pool-card").innerHTML = `<div><p class="eyebrow">${esc(poolWeekName)}</p><h2>Locked picks are ready to view</h2><p class="pool-detail">Community picks appear here after the weekly lock.</p></div><strong class="pool-amount">✓</strong>`;
     if (!board.displayWeek) {
       $("#board-title").textContent = "Weekly picks";
       $("#board-status").textContent = board.poolWeek
@@ -432,7 +496,7 @@ async function openWeek(id, entryId = null) {
     (!entry || ["draft", "rejected"].includes(entry.status));
   $(".ticket").classList.toggle("editable-ticket", editable);
   const canAddEntry =
-    weekIsPlayable(week) && (activeGroup.allowMultipleEntries || currentWeek.entries.length === 0);
+    weekIsPlayable(week) && currentWeek.entries.length < maxEntriesForActiveGroup();
   $("#entry-controls").innerHTML =
     `${currentWeek.entries.map((item) => `<button type="button" class="entry-switch ${entry?.id === item.id ? "active" : ""}" data-entry-id="${item.id}">Entry ${item.entryNumber} · ${esc(item.status)}</button>`).join("")}${canAddEntry ? '<button type="button" id="new-entry" class="entry-switch">+ New entry</button>' : ""}`;
   document
@@ -526,12 +590,16 @@ $("#submit-review").onclick = async () => {
     });
     await openWeek(currentWeek.week.id, entryId);
     $("#pick-message").textContent =
-      result.status === "submitted" ? "Picks submitted. Your entry is locked in." : "Picks submitted. The commissioner has been notified for review.";
+      result.status === "submitted" ? "Picks submitted. Your entry is locked in." : result.reviewSubmissionMessage || "Picks submitted. The commissioner has been notified for review.";
     await loadWeeks();
   } catch (e) {
     $("#pick-message").textContent = e.message;
   }
 };
+
+$("#tiebreaker").addEventListener("input", (event) => {
+  event.target.value = event.target.value.replace(/\D/g, "").slice(0, 3);
+});
 
 async function loadNotifications(markRead = false) {
   if (!me) return;
@@ -551,11 +619,17 @@ async function loadNotifications(markRead = false) {
     : '<p class="empty-board">You do not have any notifications yet.</p>';
   document
     .querySelectorAll(".notification-item[data-week-id]")
-    .forEach(
-      (item) =>
-        (item.onclick = () =>
-          openWeek(item.dataset.weekId, item.dataset.entryId)),
-    );
+    .forEach((item, index) => {
+      const notification = result.notifications[index];
+      item.onclick = () => {
+        if (notification?.type === "pick_review_requested" && canReview()) {
+          pendingReviewHighlightEntryId = item.dataset.entryId;
+          showView("reviews");
+          return;
+        }
+        openWeek(item.dataset.weekId, item.dataset.entryId);
+      };
+    });
 }
 
 async function loadPickReviews() {
@@ -572,6 +646,14 @@ async function loadPickReviews() {
         )
         .join("")
     : '<p class="empty-board">No entries are waiting for review.</p>';
+  const highlightedReview = pendingReviewHighlightEntryId
+    ? document.querySelector(`.review-item[data-entry-id="${CSS.escape(String(pendingReviewHighlightEntryId))}"]`)
+    : null;
+  if (highlightedReview) {
+    highlightedReview.classList.add("highlight");
+    highlightedReview.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  pendingReviewHighlightEntryId = null;
   document.querySelectorAll(".approve-review").forEach(
     (button) =>
       (button.onclick = async () => {
@@ -677,7 +759,11 @@ async function loadGroups() {
     button.title = locked ? 'Create or join a group to unlock this tab.' : '';
   });
   $('#commissioner-menu-item').hidden = !canReview();
-  for (const name of ['requirePickApproval','allowMultipleEntries','joiningEnabled']) $('#group-settings-form').elements[name].checked = !!activeGroup?.[name];
+  $('#group-settings-form').elements.requirePickApproval.checked = !!activeGroup?.requirePickApproval;
+  $('#group-settings-form').elements.maxEntriesPerMember.value = maxEntriesForActiveGroup();
+  $('#group-settings-form').elements.reviewSubmissionMessage.value = activeGroup?.reviewSubmissionMessage ?? '';
+  updateReviewMessageCount();
+  $('#group-settings-form').elements.joiningEnabled.checked = !!activeGroup?.joiningEnabled;
   $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
   document.querySelectorAll('[data-group-id]').forEach(button => button.onclick = () => selectGroup(Number(button.dataset.groupId)));
   if (activeGroup) {
@@ -700,13 +786,16 @@ function selectGroup(id) {
   location.reload();
 }
 $('#group-select').onchange = event => selectGroup(Number(event.target.value));
+$('#group-settings-form').elements.reviewSubmissionMessage.addEventListener('input', updateReviewMessageCount);
 for (const [id,path] of [['create-group-form','/api/groups'],['join-group-form','/api/groups/join']]) {
   $('#' + id).onsubmit = async event => {
     event.preventDefault();
     const button = event.target.querySelector('button');
     button.disabled = true;
     try {
-      const group = await api(path,{method:'POST',body:JSON.stringify(formObject(event.target))});
+      const body = formObject(event.target);
+      if (id === 'create-group-form') body.name = validateName(body.name, 'Group name', 3, 50);
+      const group = await api(path,{method:'POST',body:JSON.stringify(body)});
       selectGroup(group.id);
     } catch(error) { $('#group-message').textContent = error.message; }
     finally { button.disabled = false; }
@@ -717,11 +806,18 @@ $('#group-settings-form').onsubmit = async event => {
   const button = event.target.querySelector('button[type=submit]');
   button.disabled = true;
   try {
-    const settings = Object.fromEntries(['requirePickApproval','allowMultipleEntries','joiningEnabled'].map(name => [name,event.target.elements[name].checked]));
+    const maxEntriesPerMember = Number(event.target.elements.maxEntriesPerMember.value);
+    if (!Number.isInteger(maxEntriesPerMember) || maxEntriesPerMember < 1 || maxEntriesPerMember > 10) throw new Error('Entries per member must be between 1 and 10.');
+    const settings = {
+      requirePickApproval:event.target.elements.requirePickApproval.checked,
+      maxEntriesPerMember,
+      reviewSubmissionMessage:event.target.elements.reviewSubmissionMessage.value.trim(),
+      joiningEnabled:event.target.elements.joiningEnabled.checked,
+    };
     await api('/api/groups/' + activeGroup.id + '/settings',{method:'PATCH',body:JSON.stringify(settings)});
     await loadGroups();
-    $('#settings-message').textContent = 'Group settings saved.';
-  } catch(error) { $('#settings-message').textContent = error.message; }
+    showSettingsMessage('Group settings saved.', true);
+  } catch(error) { showSettingsMessage(error.message); }
   finally { button.disabled = false; }
 };
 $('#rotate-invite').onclick = async event => {

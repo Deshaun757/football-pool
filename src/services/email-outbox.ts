@@ -5,12 +5,14 @@ import { pool } from '../db/pool.js';
 import { config } from '../config.js';
 import { sendEmail } from './email.js';
 import { previousWeeksFinal } from './week-access.js';
+import { errorFields, logger } from '../lib/logger.js';
 
 type Database = Pick<PoolConnection, 'execute' | 'query'>;
 export async function queueEmail(db:Database, message:{key?:string;to:string;subject:string;body:string;kind:string;userId?:number;groupId?:number;weekId?:number;expiresAt?:Date}) {
   await db.execute(`INSERT INTO email_outbox (event_key,recipient,subject,body,kind,user_id,group_id,week_id,expires_at)
     VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)`,
   [message.key ?? randomUUID(),message.to,message.subject,message.body,message.kind,message.userId ?? null,message.groupId ?? null,message.weekId ?? null,message.expiresAt ?? null]);
+  logger.info('email_queued', { kind: message.kind, userId: message.userId, groupId: message.groupId, weekId: message.weekId });
 }
 
 export async function queuePickDecision(db:Database,entryId:number,decision:'approved'|'rejected',reason?:string) {
@@ -21,6 +23,20 @@ export async function queuePickDecision(db:Database,entryId:number,decision:'app
   await queueEmail(db,{to:row.email,kind:'pick_decision',userId:row.id,groupId:row.groupId,
     subject:`Huddle Pick'em: picks ${decision}`,
     body:`Your entry #${row.entry_number} for ${row.weekName} in ${row.name} was ${decision}.${reason ? `\n\nCommissioner's reason: ${reason}\nYou can update and resubmit before picks lock.` : ''}\n\nView your picks: ${config.APP_URL}`});
+}
+
+export async function queuePickReviewRequested(db:Database,entryId:number) {
+  const [rows]=await db.query<RowDataPacket[]>(`SELECT e.id,e.entry_number,u.display_name AS playerName,g.id AS groupId,g.name AS groupName,w.id AS weekId,w.name AS weekName
+    FROM entries e JOIN users u ON u.id=e.user_id JOIN pool_groups g ON g.id=e.group_id JOIN weeks w ON w.id=e.week_id WHERE e.id=?`,[entryId]);
+  const entry=rows[0];
+  if(!entry) throw new Error('Cannot queue review email for a missing entry');
+  const [commissioners]=await db.query<RowDataPacket[]>(`SELECT u.id,u.email FROM group_members m JOIN users u ON u.id=m.user_id
+    WHERE m.group_id=? AND m.role='commissioner'`,[entry.groupId]);
+  for(const commissioner of commissioners) {
+    await queueEmail(db,{kind:'pick_review_requested',to:commissioner.email,userId:commissioner.id,groupId:entry.groupId,weekId:entry.weekId,
+      subject:"Huddle Pick'em: picks are ready for review",
+      body:`${entry.playerName} submitted entry #${entry.entry_number} for ${entry.weekName} in ${entry.groupName}.\n\nReview the picks in Group commissioner: ${config.APP_URL}`});
+  }
 }
 
 export async function queueReminders(db:Database) {
@@ -54,6 +70,7 @@ export async function processEmailQueue():Promise<void> {
         const [users]=await db.query<RowDataPacket[]>('SELECT reminder_emails,result_emails FROM users WHERE id=?',[message.user_id]);
         if(!users[0] || !(message.kind==='reminder'?users[0].reminder_emails:users[0].result_emails)) {
           await db.execute('UPDATE email_outbox SET cancelled_at=UTC_TIMESTAMP(3) WHERE id=?',[message.id]);
+          logger.info('email_cancelled_by_preference', { queueId: message.id, kind: message.kind, userId: message.user_id });
           continue;
         }
       }
@@ -61,7 +78,11 @@ export async function processEmailQueue():Promise<void> {
         const [eligible]=await db.query<RowDataPacket[]>(`SELECT m.user_id FROM group_members m JOIN weeks w ON w.id=?
           WHERE m.group_id=? AND m.user_id=? AND w.status='open' AND w.picks_lock_at>UTC_TIMESTAMP(3) AND ${previousWeeksFinal('w')}
           AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.user_id=m.user_id AND e.group_id=m.group_id AND e.week_id=w.id AND e.status IN ('submitted','pending_review'))`,[message.week_id,message.group_id,message.user_id]);
-        if(!eligible.length) { await db.execute('UPDATE email_outbox SET cancelled_at=UTC_TIMESTAMP(3) WHERE id=?',[message.id]); continue; }
+        if(!eligible.length) {
+          await db.execute('UPDATE email_outbox SET cancelled_at=UTC_TIMESTAMP(3) WHERE id=?',[message.id]);
+          logger.info('email_cancelled_not_eligible', { queueId: message.id, kind: message.kind, userId: message.user_id, groupId: message.group_id, weekId: message.week_id });
+          continue;
+        }
       }
       // Persist an attempt first so crashes cannot cause an endless retry loop.
       await db.execute('UPDATE email_outbox SET attempts=attempts+1,available_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 5 MINUTE) WHERE id=?',[message.id]);
@@ -69,11 +90,12 @@ export async function processEmailQueue():Promise<void> {
         const footer=['reminder','results'].includes(message.kind)?`\n\nManage email preferences: ${new URL('/support.html',config.APP_URL)}`:'';
         await sendEmail(message.recipient,message.subject,message.body+footer,`<${message.event_key}@${new URL(config.APP_URL).hostname}>`);
         await db.execute('UPDATE email_outbox SET sent_at=UTC_TIMESTAMP(3) WHERE id=?',[message.id]);
-      } catch {
-        console.error(`Email delivery failed for queue item ${message.id}; attempt ${message.attempts+1} of 5.`);
+        logger.info('email_sent', { queueId: message.id, kind: message.kind, attempt: Number(message.attempts) + 1 });
+      } catch (error) {
+        logger.error('email_delivery_failed', { ...errorFields(error), queueId: message.id, kind: message.kind, attempt: Number(message.attempts) + 1, maxAttempts: 5 });
       }
     }
-  } catch { console.error('Email queue processing failed; it will retry on the next interval.'); }
+  } catch (error) { logger.error('email_queue_processing_failed', errorFields(error)); }
   finally {
     try { if(locked) await db?.query("SELECT RELEASE_LOCK(CONCAT('mail:',LEFT(SHA2(DATABASE(),256),48)))"); }
     finally { db?.release(); running=false; }
