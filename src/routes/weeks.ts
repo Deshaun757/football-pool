@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { RowDataPacket } from "mysql2";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
+import { previousWeeksFinal } from '../services/week-access.js';
 
 export const weeksRouter = Router();
 
@@ -48,7 +49,7 @@ weeksRouter.get("/picks-board", async (request, response) => {
   );
   const [activeWeeks] = await pool.query<BoardWeekRow[]>(
     `SELECT id, name, week_number AS weekNumber, picks_lock_at AS picksLockAt, status
-     FROM weeks WHERE status = 'open' AND picks_lock_at > UTC_TIMESTAMP(3)
+     FROM weeks w WHERE status = 'open' AND picks_lock_at > UTC_TIMESTAMP(3) AND ${previousWeeksFinal('w')}
      ORDER BY picks_lock_at ASC LIMIT 1`,
   );
   const displayWeek = lockedWeeks[0] ?? null;
@@ -68,6 +69,7 @@ weeksRouter.get("/picks-board", async (request, response) => {
       pool: poolSummary,
 
       games: [],
+      winners: [],
       entries: [],
     });
     return;
@@ -94,6 +96,15 @@ weeksRouter.get("/picks-board", async (request, response) => {
     [displayWeek.id, request.groupId],
   );
   const picksByEntry = new Map<number, Map<number, BoardPickRow>>();
+  const [winners] = await pool.query(
+    `SELECT e.id AS entryId,e.entry_number AS entryNumber,u.display_name AS displayName,
+      e.correct_picks AS correctPicks,e.tiebreaker_difference AS tiebreakerDifference
+     FROM weekly_winners win JOIN entries e ON e.id=win.entry_id
+     JOIN users u ON u.id=e.user_id JOIN weeks w ON w.id=win.week_id
+     JOIN weekly_results r ON r.week_id=w.id AND r.group_id=e.group_id
+     WHERE win.week_id=? AND e.group_id=? AND w.status='final'
+     ORDER BY u.display_name,e.entry_number,e.id`,[displayWeek.id,request.groupId],
+  );
   for (const pick of picks) {
     if (!picksByEntry.has(pick.entryId))
       picksByEntry.set(pick.entryId, new Map());
@@ -105,6 +116,7 @@ weeksRouter.get("/picks-board", async (request, response) => {
     pool: poolSummary,
 
     games,
+    winners,
     entries: entries.map((entry) => ({
       ...entry,
       picks: Object.fromEntries(picksByEntry.get(entry.id) ?? []),
@@ -115,11 +127,12 @@ weeksRouter.get("/picks-board", async (request, response) => {
 weeksRouter.get("/weeks", async (request, response) => {
   const [rows] = await pool.query(
     `SELECT w.id, w.name, w.week_number AS weekNumber, w.picks_lock_at AS picksLockAt, w.status,
+      ${previousWeeksFinal('w')} AS previousWeeksFinal,
       COUNT(e.id) AS entryCount,
       SUM(CASE WHEN e.status='pending_review' THEN 1 ELSE 0 END) AS pendingCount,
       SUM(CASE WHEN e.status='submitted' THEN 1 ELSE 0 END) AS approvedCount
      FROM weeks w LEFT JOIN entries e ON e.week_id = w.id AND e.user_id = ? AND e.group_id = ?
-     WHERE w.status <> 'draft' GROUP BY w.id,w.name,w.week_number,w.picks_lock_at,w.status
+     WHERE w.status <> 'draft' GROUP BY w.id,w.name,w.week_number,w.picks_lock_at,w.status,w.season_id
      ORDER BY w.picks_lock_at DESC`,
     [request.userId, request.groupId],
   );
@@ -146,7 +159,7 @@ weeksRouter.get("/weeks/:weekId", async (request, response) => {
     .positive()
     .parse(request.params.weekId);
   const [weeks] = await pool.query<RowDataPacket[]>(
-    "SELECT id, name, week_number AS weekNumber, picks_lock_at AS picksLockAt, status FROM weeks WHERE id = ?",
+    `SELECT id, name, week_number AS weekNumber, picks_lock_at AS picksLockAt, status, ${previousWeeksFinal('w')} AS previousWeeksFinal FROM weeks w WHERE id = ?`,
     [weekId],
   );
   const [entries] = await pool.query<RowDataPacket[]>(

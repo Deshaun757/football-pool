@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Huddle Pick’em</title>
     <link rel="icon" type="image/svg+xml" href="/huddle-icon.svg?v=9f8c47a70dec8bde" />
-    <link rel="stylesheet" href="/styles.css?v=85174abed8e370a5" />
+    <link rel="stylesheet" href="/styles.css?v=051739e84799d765" />
   </head>
   <body>
     <header>
@@ -113,6 +113,7 @@
               >
               <span><i class="legend-swatch pending"></i> Game pending</span>
             </div>
+            <section id="week-winners" class="week-winners" aria-live="polite" hidden></section>
             <div id="picks-board" class="picks-board"></div>
           </section>
         </section>
@@ -240,38 +241,15 @@
             <div class="users-table-scroll" tabindex="0" role="region" aria-label="Registered users table"><table><thead><tr><th scope="col">ID</th><th scope="col">Display name</th><th scope="col">Email</th><th scope="col">App role</th><th scope="col">Groups</th><th scope="col">Registered</th></tr></thead><tbody id="users-rows"></tbody></table></div>
             <div class="users-pages"><button id="users-prev" type="button" disabled>Previous</button><button id="users-next" type="button" disabled>Next</button></div>
           </section>
-          <div class="admin-grid">
-            <form id="result-form" class="panel">
-              <h3>Post result</h3>
-              <input
-                name="gameId"
-                type="number"
-                placeholder="Game ID"
-                required
-              /><input
-                name="awayScore"
-                type="number"
-                min="0"
-                placeholder="Away score"
-                required
-              /><input
-                name="homeScore"
-                type="number"
-                min="0"
-                placeholder="Home score"
-                required
-              /><button>Mark final</button>
-            </form>
-            <form id="score-form" class="panel">
-              <h3>Finalize week</h3>
-              <input
-                name="weekId"
-                type="number"
-                placeholder="Week ID"
-                required
-              /><button>Score week</button>
-            </form>
-          </div>
+          <section class="panel" aria-labelledby="results-heading">
+            <h3 id="results-heading">Game scores and weekly results</h3>
+            <label>Select week<select id="results-week"></select></label>
+            <p>Enter each game's final score and save it. Once every game is final, finalize the week to calculate winners, email results, and unlock the next week.</p>
+            <p id="results-status" role="status"></p>
+            <div id="results-games"></div>
+            <button id="finalize-week" type="button" disabled>Finalize selected week</button>
+            <p id="finalize-message" role="status"></p>
+          </section>
           <p id="admin-message"></p>
         </section>
         <nav id="mobile-nav" class="mobile-nav" aria-label="Primary navigation">
@@ -289,6 +267,6 @@
       </section>
     </main>
     <footer class="site-footer"><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/rules.html">Pool rules</a><a href="/cookies.html">Cookies</a><a href="/support.html">Support &amp; privacy requests</a></footer>
-    <script type="module" src="/app.js?v=2885043b9202bd49"></script>
+    <script type="module" src="/app.js?v=efc8d40c7ca27fef"></script>
   </body>
 </html>

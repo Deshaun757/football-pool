@@ -152,6 +152,16 @@ header {
 }
 .brand-icon { width: 32px; height: 32px; flex-shrink: 0; }
 .required-mark { color: #b3261e; }
+.week-winners { margin:20px 0; padding:24px; border:2px solid var(--gold); border-radius:14px; background:var(--paper); overflow-wrap:anywhere; }
+.week-winners h2 { margin:8px 0 16px; }
+.week-winners ul { list-style:none; margin:0; padding:0; display:grid; gap:16px; }
+.week-winners li span { display:block; margin-top:6px; color:var(--muted); }
+.matchup-final { display:block; margin-top:8px; color:var(--green); font-size:13px; white-space:nowrap; }
+.game-score-form { padding:20px 0; border-bottom:1px solid var(--line); margin-bottom:16px; }
+.score-fields { display:flex; flex-wrap:wrap; gap:16px; align-items:end; }
+.score-fields label { flex:1 1 200px; min-width:0; margin:0; }
+button.week-card { color:var(--ink); text-align:left; font:inherit; width:100%; }
+button.week-card:disabled { cursor:not-allowed; opacity:.65; }
 .member-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:16px 0; border-bottom:1px solid var(--line); }
 .member-row > div { min-width:0; overflow-wrap:anywhere; }
 .member-email { margin:6px 0 0; color:var(--muted); }

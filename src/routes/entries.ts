@@ -5,6 +5,7 @@ import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../lib/http-error.js";
 import { validatePicks } from "../services/entry-validation.js";
+import { requirePreviousWeeksFinal } from '../services/week-access.js';
 
 const saveSchema = z.object({
   entryId: z.number().int().positive().optional(),
@@ -56,6 +57,7 @@ entriesRouter.put("/weeks/:weekId/entry", async (request, response) => {
     const week = weeks[0];
     if (!week || week.status !== "open" || week.picks_lock_at <= new Date())
       throw new HttpError(409, "Picks are closed for this week");
+    await requirePreviousWeeksFinal(connection,weekId);
 
     const [games] = await connection.query<GameRow[]>(
       "SELECT id, home_team_id, away_team_id FROM games WHERE week_id = ? AND status = 'scheduled'",
@@ -147,7 +149,7 @@ entriesRouter.post(
       const [entries] = await connection.query<
         (EntryRow & { week_name: string })[]
       >(
-        `SELECT e.id, e.status, e.tiebreaker_total, w.name AS week_name FROM entries e
+        `SELECT e.id, e.week_id, e.status, e.tiebreaker_total, w.name AS week_name FROM entries e
        JOIN weeks w ON w.id=e.week_id WHERE e.id=? AND e.user_id=? AND e.group_id=? AND w.status='open'
        AND w.picks_lock_at>UTC_TIMESTAMP(3) FOR UPDATE`,
         [entryId, userId, request.groupId!],
@@ -155,6 +157,7 @@ entriesRouter.post(
       const entry = entries[0];
       if (!entry || !["draft", "rejected"].includes(entry.status))
         throw new HttpError(409, "This entry cannot be submitted for review");
+      await requirePreviousWeeksFinal(connection,Number(entry.week_id));
       const [counts] = await connection.query<
         (RowDataPacket & { picks_count: number; games_count: number })[]
       >(

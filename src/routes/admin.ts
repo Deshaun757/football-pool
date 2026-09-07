@@ -7,9 +7,27 @@ import { scoreWeek } from "../services/score-week.js";
 import { importScheduleCsv } from "../services/import-schedule.js";
 import { fetchScheduleCsv } from "../services/fetch-schedule.js";
 import { HttpError } from "../lib/http-error.js";
+import { previousWeeksFinal } from '../services/week-access.js';
 
 export const adminRouter = Router();
 adminRouter.use('/admin', requireAuth, requireAdmin);
+
+adminRouter.get('/admin/weeks',async (_request,response)=>{
+  const [weeks]=await pool.query(`SELECT w.id,w.name,w.week_number AS weekNumber,s.year,w.status,w.picks_lock_at AS picksLockAt,
+    CASE WHEN w.status='final' THEN 'Finalized'
+      WHEN w.status='draft' OR NOT (${previousWeeksFinal('w')}) THEN 'Locked'
+      ELSE 'Open for scoring' END AS scoringStatus
+    FROM weeks w JOIN seasons s ON s.id=w.season_id ORDER BY s.year DESC,w.week_number ASC`);
+  response.json(weeks);
+});
+adminRouter.get('/admin/weeks/:weekId/games',async(request,response)=>{
+  const weekId=z.coerce.number().int().positive().parse(request.params.weekId);
+  const [games]=await pool.query(`SELECT g.id,g.status,g.kickoff_at AS kickoffAt,g.away_score AS awayScore,g.home_score AS homeScore,
+    g.is_monday_tiebreaker AS isTiebreaker,CONCAT(a.city,' ',a.name) AS awayName,CONCAT(h.city,' ',h.name) AS homeName
+    FROM games g JOIN teams a ON a.id=g.away_team_id JOIN teams h ON h.id=g.home_team_id
+    WHERE g.week_id=? ORDER BY g.kickoff_at,g.id`,[weekId]);
+  response.json(games);
+});
 
 adminRouter.get('/admin/users', async (request,response) => {
   const {page,q}=z.object({page:z.coerce.number().int().min(1).max(1000000).default(1),q:z.string().trim().max(100).default('')}).parse(request.query);
@@ -117,10 +135,11 @@ adminRouter.patch("/admin/games/:gameId/result", async (request, response) => {
       homeScore: z.number().int().min(0).max(200),
     })
     .parse(request.body);
-  await pool.execute(
+  const [updated] = await pool.execute<ResultSetHeader>(
     "UPDATE games SET away_score=?, home_score=?, status='final' WHERE id=?",
     [body.awayScore, body.homeScore, gameId],
   );
+  if(!updated.affectedRows) throw new HttpError(404,'Game not found');
   response.json({ id: gameId, status: "final" });
 });
 adminRouter.post("/admin/weeks/:weekId/score", async (request, response) => {

@@ -4,6 +4,7 @@ import type { RowDataPacket } from 'mysql2';
 import { pool } from '../db/pool.js';
 import { config } from '../config.js';
 import { sendEmail } from './email.js';
+import { previousWeeksFinal } from './week-access.js';
 
 type Database = Pick<PoolConnection, 'execute' | 'query'>;
 export async function queueEmail(db:Database, message:{key?:string;to:string;subject:string;body:string;kind:string;userId?:number;groupId?:number;weekId?:number;expiresAt?:Date}) {
@@ -26,7 +27,7 @@ export async function queueReminders(db:Database) {
   const [rows]=await db.query<RowDataPacket[]>(`SELECT u.id,u.email,g.id AS groupId,g.name,w.id AS weekId,w.name AS weekName,w.picks_lock_at
     FROM group_members m JOIN users u ON u.id=m.user_id JOIN pool_groups g ON g.id=m.group_id
     JOIN weeks w ON w.status='open' AND w.picks_lock_at>UTC_TIMESTAMP(3) AND w.picks_lock_at<=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 24 HOUR)
-    WHERE u.reminder_emails=TRUE AND EXISTS (SELECT 1 FROM games WHERE week_id=w.id)
+    WHERE u.reminder_emails=TRUE AND ${previousWeeksFinal('w')} AND EXISTS (SELECT 1 FROM games WHERE week_id=w.id)
     AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.user_id=u.id AND e.group_id=g.id AND e.week_id=w.id AND e.status IN ('submitted','pending_review'))`);
   for(const row of rows) await queueEmail(db,{key:`reminder:${row.groupId}:${row.weekId}:${row.id}`,kind:'reminder',to:row.email,userId:row.id,groupId:row.groupId,weekId:row.weekId,expiresAt:row.picks_lock_at,
     subject:"Huddle Pick'em: picks close soon",body:`Remember to submit your ${row.weekName} picks for ${row.name}.\n\nPicks lock at ${new Date(row.picks_lock_at).toISOString()} (UTC).\n\nMake your picks: ${config.APP_URL}`});
@@ -58,7 +59,7 @@ export async function processEmailQueue():Promise<void> {
       }
       if(message.kind==='reminder') {
         const [eligible]=await db.query<RowDataPacket[]>(`SELECT m.user_id FROM group_members m JOIN weeks w ON w.id=?
-          WHERE m.group_id=? AND m.user_id=? AND w.status='open' AND w.picks_lock_at>UTC_TIMESTAMP(3)
+          WHERE m.group_id=? AND m.user_id=? AND w.status='open' AND w.picks_lock_at>UTC_TIMESTAMP(3) AND ${previousWeeksFinal('w')}
           AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.user_id=m.user_id AND e.group_id=m.group_id AND e.week_id=w.id AND e.status IN ('submitted','pending_review'))`,[message.week_id,message.group_id,message.user_id]);
         if(!eligible.length) { await db.execute('UPDATE email_outbox SET cancelled_at=UTC_TIMESTAMP(3) WHERE id=?',[message.id]); continue; }
       }

@@ -161,6 +161,7 @@ async function showDashboard() {
   if (!boardRefreshTimer)
     boardRefreshTimer = setInterval(() => {
       if (!activeGroup) return;
+      if (activeView === "place-picks" && $("#week-detail").hidden) loadWeeks().catch(error=>{ $("#weeks").textContent=error.message; });
       Promise.all([loadPicksBoard(), loadNotifications(), ...(canReview() ? [loadPickReviews()] : [])])
         .catch(error => { $('#group-message').textContent = error.message; });
     }, 15000);
@@ -227,7 +228,9 @@ function showView(view) {
     .forEach((button) =>
       button.classList.toggle("active", button.dataset.view === view),
     );
-  if (view === "admin") loadUsers();
+  if (view === "admin") { loadUsers(); loadResultWeeks(); }
+  if (view === "place-picks") loadWeeks().catch(error=>{ $("#weeks").textContent=error.message; });
+  if (view === "home" && activeGroup) loadPicksBoard();
   if (view === "history") renderHistory();
   if (view === "notifications") loadNotifications(true);
   if (view === "reviews") loadPickReviews().catch(error => { $("#review-message").textContent = error.message; });
@@ -253,6 +256,9 @@ function renderAccount() {
 async function loadPicksBoard() {
   try {
     const board = await api("/api/picks-board");
+    const winners=board.winners ?? [];
+    $('#week-winners').hidden=!winners.length;
+    $('#week-winners').innerHTML=winners.length ? `<p class="eyebrow">Final results · ${esc(board.displayWeek.name)}</p><h2>${winners.length===1?'Week winner':'Week co-winners'}</h2><ul>${winners.map(winner=>`<li><strong>${esc(winner.displayName)}</strong> · Entry ${esc(winner.entryNumber)}<span>${esc(winner.correctPicks)} correct picks · Tiebreaker difference: ${esc(winner.tiebreakerDifference)}</span></li>`).join('')}</ul>` : '';
     board.games.sort(
       (a, b) => new Date(a.kickoffAt) - new Date(b.kickoffAt) || a.id - b.id,
     );
@@ -272,11 +278,7 @@ async function loadPicksBoard() {
       board.poolWeek?.id !== board.displayWeek.id
         ? `Showing the previous week until ${board.poolWeek.name} locks ${easternDate(board.poolWeek.picksLockAt)} at ${easternTime(board.poolWeek.picksLockAt)} ET`
         : `Locked ${easternDate(board.displayWeek.picksLockAt)} at ${easternTime(board.displayWeek.picksLockAt)} ET`;
-    if (!board.entries.length) {
-      $("#picks-board").innerHTML =
-        '<p class="empty-board">No paid picks were submitted for this week.</p>';
-      return;
-    }
+
     const winnerId = (game) =>
       game.status === "final" && game.homeScore !== game.awayScore
         ? game.homeScore > game.awayScore
@@ -286,7 +288,7 @@ async function loadPicksBoard() {
     const headers = board.games
       .map(
         (game) =>
-          `<th><span class="pick-matchup"><span>${esc(game.awayAbbreviation)} @ ${esc(game.homeAbbreviation)}</span><span class="pick-matchup-logos">${game.awayLogoUrl ? `<img src="${esc(game.awayLogoUrl)}" alt="">` : ""}${game.homeLogoUrl ? `<img src="${esc(game.homeLogoUrl)}" alt="">` : ""}</span><small>${easternDay(game.kickoffAt).slice(0, 3)} ${easternTime(game.kickoffAt)} ET</small></span></th>`,
+          `<th><span class="pick-matchup"><span>${esc(game.awayAbbreviation)} @ ${esc(game.homeAbbreviation)}</span><span class="pick-matchup-logos">${game.awayLogoUrl ? `<img src="${esc(game.awayLogoUrl)}" alt="">` : ""}${game.homeLogoUrl ? `<img src="${esc(game.homeLogoUrl)}" alt="">` : ""}</span><small>${easternDay(game.kickoffAt).slice(0, 3)} ${easternTime(game.kickoffAt)} ET</small>${game.status === "final" ? `<strong class="matchup-final">Final: ${esc(game.awayAbbreviation)} ${game.awayScore} - ${esc(game.homeAbbreviation)} ${game.homeScore}</strong>` : ""}</span></th>`,
       )
       .join("");
     const rows = board.entries
@@ -330,33 +332,46 @@ async function loadPicksBoard() {
             ? `${game.awayScore}–${game.homeScore}`
             : "AT";
         const kickoff = `${easternDay(game.kickoffAt).slice(0, 3)} ${easternTime(game.kickoffAt)} ET`;
-        return `<article class="mobile-pick-card"><div class="mobile-matchup"><div>${game.awayLogoUrl ? `<img src="${esc(game.awayLogoUrl)}" alt="">` : ""}<strong>${esc(game.awayAbbreviation)}</strong></div><span><b>${score}</b><small>${kickoff}</small></span><div>${game.homeLogoUrl ? `<img src="${esc(game.homeLogoUrl)}" alt="">` : ""}<strong>${esc(game.homeAbbreviation)}</strong></div></div><ul>${playerPicks}</ul><p class="mobile-swipe-hint">Swipe for next matchup →</p></article>`;
+        return `<article class="mobile-pick-card"><div class="mobile-matchup"><div>${game.awayLogoUrl ? `<img src="${esc(game.awayLogoUrl)}" alt="">` : ""}<strong>${esc(game.awayAbbreviation)}</strong></div><span><b>${score}</b><small>${game.status === "final" ? "Final" : kickoff}</small></span><div>${game.homeLogoUrl ? `<img src="${esc(game.homeLogoUrl)}" alt="">` : ""}<strong>${esc(game.homeAbbreviation)}</strong></div></div><ul>${playerPicks}</ul><p class="mobile-swipe-hint">Swipe for next matchup →</p></article>`;
       })
       .join("");
     $("#picks-board").innerHTML =
-      `<table class="picks-table"><thead><tr><th>Player</th>${headers}<th>Tiebreaker</th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-picks">${mobileCards}</div>`;
+      `<p class="meta">Scores and picks for ${esc(board.displayWeek.name)}.</p>${!board.entries.length ? '<p class="meta">No approved entries for this week. Game scores are shown below.</p>' : ""}<table class="picks-table"><thead><tr><th>Player</th>${headers}<th>Tiebreaker</th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-picks">${mobileCards}</div>`;
   } catch (error) {
+    if (me)
+      $('#week-winners').hidden=true;
     if (me)
       $("#picks-board").innerHTML =
         `<p class="empty-board">${esc(error.message)}</p>`;
   }
+}
+function weekIsPlayable(week) {
+  return week.status === 'open' && Boolean(Number(week.previousWeeksFinal)) && new Date(week.picksLockAt) > new Date();
+}
+function weekOrder(week) {
+  if (weekIsPlayable(week)) return 0;
+  if (week.status === 'final') return 3;
+  if (new Date(week.picksLockAt) <= new Date()) return 1;
+  return 2;
+}
+function weekLabel(week) {
+  if (weekIsPlayable(week)) return 'Open for picks';
+  if (week.status === 'final') return 'Completed - locked';
+  if (new Date(week.picksLockAt) <= new Date()) return 'Picks locked';
+  if (!Number(week.previousWeeksFinal)) return 'Locked until previous weeks are finalized';
+  return 'Picks locked';
 }
 async function loadWeeks() {
   [weeksData, myEntriesData] = await Promise.all([
     api("/api/weeks"),
     api("/api/my-entries"),
   ]);
-  $("#weeks").innerHTML = weeksData.length
-    ? weeksData
-        .map(
-          (w) =>
-            `<article class="week-card" data-id="${w.id}"><span class="pill">${Number(w.entryCount) ? `${w.entryCount} ${Number(w.entryCount) === 1 ? "entry" : "entries"}` : w.status}</span><h2>${esc(w.name)}</h2><p class="meta">Locks ${date(w.picksLockAt)}</p></article>`,
-        )
-        .join("")
-    : "<p>No open weeks yet. The commissioner is building the schedule.</p>";
-  document
-    .querySelectorAll(".week-card")
-    .forEach((card) => (card.onclick = () => openWeek(card.dataset.id)));
+  weeksData.sort((a,b)=>weekOrder(a)-weekOrder(b) || (weekOrder(a)===3 ? new Date(b.picksLockAt)-new Date(a.picksLockAt) : new Date(a.picksLockAt)-new Date(b.picksLockAt)) || a.id-b.id);
+  $('#weeks').innerHTML = weeksData.length ? weeksData.map(w => {
+    const futureLocked = !weekIsPlayable(w) && w.status !== 'final' && new Date(w.picksLockAt) > new Date();
+    return `<button type="button" class="week-card" data-id="${w.id}" ${futureLocked?'disabled':''}><span class="pill">${weekLabel(w)}</span><h2>${esc(w.name)}</h2><p class="meta">Locks ${date(w.picksLockAt)}</p><p class="meta">${Number(w.entryCount)||0} entries${futureLocked?'':' ? '+(weekIsPlayable(w)?'Make picks':'View picks')}</p></button>`;
+  }).join('') : '<p>No weeks are available yet. The app administrator needs to import the schedule.</p>';
+  document.querySelectorAll('.week-card').forEach(card=>card.onclick=()=>openWeek(card.dataset.id));
   renderHistory();
 }
 
@@ -387,19 +402,18 @@ async function openWeek(id, entryId = null) {
   });
   $("#week-detail").hidden = false;
   const { week, games, entry } = currentWeek;
-  $("#pick-message").textContent = "";
+  $("#pick-message").textContent = weekIsPlayable(week) ? "" : weekLabel(week);
   games.sort(
     (a, b) => new Date(a.kickoffAt) - new Date(b.kickoffAt) || a.id - b.id,
   );
   $("#week-heading").innerHTML =
     `<div class="detail-title"><div><p class="eyebrow">Week ${week.weekNumber}</p><h2>${esc(week.name)}${entry ? ` · Entry ${entry.entryNumber}` : " · New entry"}</h2></div><p class="meta">Locks ${date(week.picksLockAt)}</p></div>`;
   const editable =
-    week.status === "open" &&
-    new Date(week.picksLockAt) > new Date() &&
+    weekIsPlayable(week) &&
     (!entry || ["draft", "rejected"].includes(entry.status));
   $(".ticket").classList.toggle("editable-ticket", editable);
   const canAddEntry =
-    week.status === "open" && new Date(week.picksLockAt) > new Date() && (activeGroup.allowMultipleEntries || currentWeek.entries.length === 0);
+    weekIsPlayable(week) && (activeGroup.allowMultipleEntries || currentWeek.entries.length === 0);
   $("#entry-controls").innerHTML =
     `${currentWeek.entries.map((item) => `<button type="button" class="entry-switch ${entry?.id === item.id ? "active" : ""}" data-entry-id="${item.id}">Entry ${item.entryNumber} · ${esc(item.status)}</button>`).join("")}${canAddEntry ? '<button type="button" id="new-entry" class="entry-switch">+ New entry</button>' : ""}`;
   document
@@ -600,6 +614,7 @@ $("#schedule-import-form").onsubmit = async (event) => {
     });
     $("#admin-message").textContent =
       `Imported ${result.teams} teams, ${result.weeks} weeks, and ${result.games} games.`;
+    await loadResultWeeks();
     if (activeGroup) await loadWeeks();
   } catch (error) {
     $("#admin-message").textContent = error.message;
@@ -620,6 +635,7 @@ $("#schedule-file").onchange = async (event) => {
     });
     $("#admin-message").textContent =
       `Imported ${result.teams} teams, ${result.weeks} weeks, and ${result.games} games.`;
+    await loadResultWeeks();
     if (activeGroup) await loadWeeks();
   } catch (error) {
     $("#admin-message").textContent = error.message;
@@ -630,35 +646,6 @@ $("#schedule-file").onchange = async (event) => {
 function formObject(form) {
   return Object.fromEntries(new FormData(form));
 }
-function wireForm(id, path, transform = (body) => body, method = "POST") {
-  $(id).onsubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const body = transform(formObject(e.target));
-      const result = await api(typeof path === "function" ? path(body) : path, {
-        method,
-        body: JSON.stringify(body),
-      });
-      $("#admin-message").textContent =
-        `Saved successfully${result.id ? ` (ID ${result.id})` : ""}.`;
-      e.target.reset();
-
-    } catch (error) {
-      $("#admin-message").textContent = error.message;
-    }
-  };
-}
-wireForm(
-  "#result-form",
-  (b) => `/api/admin/games/${b.gameId}/result`,
-  (b) => ({ awayScore: Number(b.awayScore), homeScore: Number(b.homeScore) }),
-  "PATCH",
-);
-wireForm(
-  "#score-form",
-  (b) => `/api/admin/weeks/${b.weekId}/score`,
-  () => ({}),
-);
 async function loadGroups() {
   groups = await api('/api/groups');
   const saved = Number(localStorage.getItem('pickem-group-' + me.id));
@@ -759,4 +746,76 @@ $('#users-search').onsubmit=event=>{event.preventDefault();usersQuery=new FormDa
 $('#users-refresh').onclick=()=>{usersPage=1;loadUsers();};
 $('#users-prev').onclick=()=>{usersPage--;loadUsers();};
 $('#users-next').onclick=()=>{usersPage++;loadUsers();};
+let resultWeeks=[], resultGames=[], resultRequest=0, resultBusy=false;
+function setResultBusy(value) {
+  resultBusy=value;
+  document.querySelectorAll(".game-score-form input,.game-score-form button").forEach(control=>control.disabled=value);
+  $("#results-week").disabled=value || !resultWeeks.length;
+  updateFinalizeButton();
+}
+async function loadResultWeeks() {
+  try {
+    const selected=$('#results-week').value;
+    resultWeeks=await api('/api/admin/weeks');
+    const preferred=resultWeeks.find(w=>String(w.id)===selected && w.scoringStatus!=='Locked') ?? resultWeeks.find(w=>w.scoringStatus==='Open for scoring') ?? resultWeeks[0];
+    $('#results-week').innerHTML=resultWeeks.map(w=>`<option value="${w.id}" ${w.scoringStatus==='Locked'?'disabled':''}>${esc(w.year)} - ${esc(w.name)} (${esc(w.scoringStatus ?? w.status)})</option>`).join('');
+    $('#results-week').disabled=!resultWeeks.length;
+    if(preferred) $('#results-week').value=String(preferred.id);
+    await loadResultGames();
+  } catch(error) {$('#results-status').textContent=error.message;}
+}
+function updateFinalizeButton() {
+  const forms=[...document.querySelectorAll('.game-score-form')];
+  const dirty=forms.some(form=>form.dataset.dirty==='true');
+  const ready=resultGames.length>0 && resultGames.every(g=>g.status==='final' && g.homeScore!==null && g.awayScore!==null) && resultGames.some(g=>g.isTiebreaker);
+  $('#finalize-week').disabled=resultBusy || !ready || dirty;
+  const week=resultWeeks.find(w=>String(w.id)===$('#results-week').value);
+  $('#finalize-week').textContent=week?.status==='final'?'Recalculate selected week':'Finalize selected week';
+  $('#results-status').textContent=`${resultGames.filter(g=>g.status==='final').length} of ${resultGames.length} games final.${dirty?' Save changed scores before finalizing.':!resultGames.some(g=>g.isTiebreaker)?' A designated Monday tiebreaker is required.':''}`;
+}
+async function loadResultGames() {
+  const request=++resultRequest,weekId=$('#results-week').value;
+  $('#finalize-week').disabled=true;$('#results-games').replaceChildren();resultGames=[];
+  $('#finalize-message').textContent='';
+  if(!weekId){$('#results-status').textContent='Import a schedule to enter scores.';return;}
+  $('#results-status').textContent='Loading games...';
+  try {
+    const games=await api(`/api/admin/weeks/${weekId}/games`);
+    if(request!==resultRequest)return;
+    resultGames=games;
+    $('#results-games').innerHTML=games.map(g=>`<form class="game-score-form" data-game="${g.id}"><h4>${esc(g.awayName)} at ${esc(g.homeName)}</h4><p class="meta">${esc(date(g.kickoffAt))}${g.isTiebreaker?' - Monday tiebreaker':''}</p><div class="score-fields"><label>${esc(g.awayName)} (away)<input type="number" name="awayScore" min="0" max="200" step="1" required value="${g.awayScore ?? ''}"></label><label>${esc(g.homeName)} (home)<input type="number" name="homeScore" min="0" max="200" step="1" required value="${g.homeScore ?? ''}"></label><button>${g.status==='final'?'Save correction':'Save final score'}</button></div><p class="game-save-message" role="status">${esc(g.status)}</p></form>`).join('');
+    document.querySelectorAll('.game-score-form').forEach(form=>{
+      form.oninput=()=>{form.dataset.dirty='true';updateFinalizeButton();};
+      form.onsubmit=async event=>{
+        event.preventDefault();if(resultBusy)return;setResultBusy(true);const button=form.querySelector('button');button.disabled=true;
+        $('#results-week').disabled=true;$('#finalize-week').disabled=true;
+        const body={awayScore:Number(form.elements.awayScore.value),homeScore:Number(form.elements.homeScore.value)};
+        try {
+          await api(`/api/admin/games/${form.dataset.game}/result`,{method:'PATCH',body:JSON.stringify(body)});
+          const game=resultGames.find(g=>String(g.id)===form.dataset.game);Object.assign(game,body,{status:'final'});
+          form.dataset.dirty=String(Number(form.elements.awayScore.value)!==body.awayScore || Number(form.elements.homeScore.value)!==body.homeScore);
+          form.querySelector('.game-save-message').textContent='Final score saved. Finalize the week to calculate or update results.';
+          button.textContent='Save correction';
+          if(activeGroup) await loadPicksBoard();
+        } catch(error){form.querySelector('.game-save-message').textContent=error.message;}
+        finally {setResultBusy(false);}
+      };
+    });
+    updateFinalizeButton();
+  } catch(error){if(request===resultRequest)$('#results-status').textContent=error.message;}
+}
+$('#results-week').onchange=loadResultGames;
+$('#finalize-week').onclick=async()=>{
+  if(resultBusy)return;
+  const weekId=$('#results-week').value;
+  if(!confirm('Finalize this week? This calculates group winners, queues results emails, and unlocks the next week if its deadline has not passed.'))return;
+  setResultBusy(true);
+  try {
+    const result=await api(`/api/admin/weeks/${weekId}/score`,{method:'POST'});
+    await loadResultWeeks();
+    $('#finalize-message').textContent=`Week finalized: ${result.winners} winning entries across all groups. Results emails queued where applicable.`;
+    if(activeGroup) await loadWeeks();
+  } catch(error){$('#finalize-message').textContent=error.message;updateFinalizeButton();}
+  finally {setResultBusy(false);}
+};
 boot();
