@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:groups": "npm run build && node scripts/test-groups.mjs",
+    "test:password-reset": "npm run build && node scripts/test-password-reset.mjs",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed-demo": "tsx src/db/seed-demo.ts"
   },
@@ -17,9 +18,11 @@
     "csv-parse": "^7.0.2",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.7.0",
     "helmet": "^8.1.0",
     "luxon": "^3.7.2",
     "mysql2": "^3.14.3",
+    "nodemailer": "^10.0.0",
     "zod": "^4.0.17"
   },
   "devDependencies": {
@@ -27,6 +30,7 @@
     "@types/express": "^5.0.3",
     "@types/luxon": "^3.7.3",
     "@types/node": "^24.2.0",
+    "@types/nodemailer": "^8.0.1",
     "prettier": "^3.9.6",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",

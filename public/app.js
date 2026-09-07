@@ -2,6 +2,8 @@ const $ = (selector) => document.querySelector(selector);
 let me = null,
   registerMode = false,
   currentWeek = null;
+let forgotMode = false;
+let resetToken = location.pathname === '/reset-password' ? new URLSearchParams(location.hash.slice(1)).get('token') : null;
 let boardRefreshTimer = null;
 let activeGroup = null;
 let groups = [];
@@ -31,7 +33,7 @@ async function api(path, options = {}) {
   });
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "Something went wrong");
+  if (!response.ok) throw new Error(data.details?.map(issue => issue.message).join(". ") || data.error || "Something went wrong");
   return data;
 }
 const date = (value) =>
@@ -69,6 +71,7 @@ const easternTime = (value) =>
   }).format(new Date(value));
 
 async function boot() {
+  if (location.pathname === "/reset-password") { configureAuth(); return; }
   try {
     me = await api("/api/auth/me");
     if (me) await showDashboard();
@@ -79,30 +82,63 @@ async function boot() {
   }
 }
 
-$("#auth-toggle").onclick = () => {
-  registerMode = !registerMode;
-  $("#name-label").hidden = !registerMode;
-  $("#auth-title").textContent = registerMode
-    ? "Join the pool"
-    : "Welcome back";
-  $("#auth-toggle").textContent = registerMode
-    ? "Already registered? Log in"
-    : "Need an account? Register";
+function configureAuth() {
+  const resetting = location.pathname === '/reset-password';
+  const newPassword = registerMode || resetting;
+  $('#name-label').hidden = !registerMode;
+  $('#display-name').required = registerMode;
+  $('#email').closest('label').hidden = resetting;
+  $('#email').required = !resetting;
+  $('#password').closest('label').hidden = forgotMode;
+  $('#password').required = !forgotMode;
+  $('#password').maxLength = newPassword ? 128 : 200;
+  $('#password').autocomplete = newPassword ? 'new-password' : 'current-password';
+  $('#confirm-password-label').hidden = !newPassword;
+  $('#confirm-password').required = newPassword;
+  $('#password-help').hidden = !newPassword;
+  $('#forgot-password').hidden = forgotMode || newPassword;
+  $('#auth-title').textContent = resetting ? 'Reset your password' : forgotMode ? 'Forgot your password?' : registerMode ? 'Join the pool' : 'Welcome back';
+  $('#auth-toggle').textContent = forgotMode || resetting || registerMode ? 'Back to sign in' : 'Need an account? Register';
+  $('#auth-form button[type=submit]').textContent = resetting ? 'Reset password' : forgotMode ? 'Send reset link' : 'Continue';
+}
+$('#forgot-password').onclick = () => { forgotMode = true; registerMode = false; $('#auth-error').textContent = ''; configureAuth(); };
+$('#auth-toggle').onclick = () => {
+  if (forgotMode || location.pathname === '/reset-password') {
+    forgotMode = false; registerMode = false; resetToken = null; history.replaceState(null,'','/');
+  } else registerMode = !registerMode;
+  $('#auth-error').textContent = ''; configureAuth();
 };
-$("#auth-form").onsubmit = async (event) => {
+$('#auth-form').onsubmit = async event => {
   event.preventDefault();
-  $("#auth-error").textContent = "";
+  const button = event.target.querySelector('button[type=submit]');
+  button.disabled = true;
+  $('#auth-error').textContent = '';
   try {
-    const body = { email: $("#email").value, password: $("#password").value };
-    if (registerMode) body.displayName = $("#display-name").value;
-    me = await api(`/api/auth/${registerMode ? "register" : "login"}`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    const body = {email:$('#email').value,password:$('#password').value};
+    if (forgotMode) {
+      const result = await api('/api/auth/forgot-password',{method:'POST',body:JSON.stringify({email:body.email})});
+      $('#auth-error').textContent = result.message;
+      return;
+    }
+    const resetting = location.pathname === '/reset-password';
+    if (registerMode || resetting) {
+      body.confirmPassword = $('#confirm-password').value;
+      if (body.password !== body.confirmPassword) throw new Error('Passwords do not match');
+      if (body.password.length < 10 || body.password.length > 128 || !/[a-z]/.test(body.password) || !/[A-Z]/.test(body.password) || !/[0-9]/.test(body.password) || !/[^a-zA-Z0-9\s]/.test(body.password)) throw new Error('Use 10�128 characters with uppercase, lowercase, a number, and a special character.');
+    }
+    if (resetting) {
+      if (!resetToken) throw new Error('This reset link is invalid. Request a new one.');
+      const result = await api('/api/auth/reset-password',{method:'POST',body:JSON.stringify({...body,token:resetToken})});
+      resetToken = null; history.replaceState(null,'','/');
+      $('#password').value = ''; $('#confirm-password').value = '';
+      configureAuth(); $('#auth-error').textContent = result.message;
+      return;
+    }
+    if (registerMode) body.displayName = $('#display-name').value;
+    me = await api('/api/auth/' + (registerMode ? 'register' : 'login'),{method:'POST',body:JSON.stringify(body)});
     await showDashboard();
-  } catch (error) {
-    $("#auth-error").textContent = error.message;
-  }
+  } catch(error) { $('#auth-error').textContent = error.message; }
+  finally { button.disabled = false; }
 };
 
 async function showDashboard() {

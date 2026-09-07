@@ -65,11 +65,15 @@
               minlength="10"
               autocomplete="current-password"
               required /></label
-          ><button class="primary" type="submit">Continue</button
+          >
+          <label id="confirm-password-label" hidden>Confirm password<input id="confirm-password" type="password" autocomplete="new-password" maxlength="128"></label>
+          <p id="password-help" class="meta" hidden>Use 10–128 characters, including uppercase, lowercase, a number, and a special character.</p>
+          <button class="primary" type="submit">Continue</button
           ><button id="auth-toggle" class="link" type="button">
             Need an account? Register
           </button>
-          <p id="auth-error" class="error"></p>
+          <button id="forgot-password" class="link" type="button">Forgot password?</button>
+          <p id="auth-error" class="error" role="status"></p>
         </form>
       </section>
       <section id="dashboard" hidden>

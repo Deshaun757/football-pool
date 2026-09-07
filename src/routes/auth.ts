@@ -8,12 +8,65 @@ import { parseCookies } from '../lib/cookies.js';
 import { HttpError } from '../lib/http-error.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { requireAuth } from '../middleware/auth.js';
+import { passwordPair } from '../lib/password-policy.js';
+import { sendPasswordReset } from '../services/email.js';
+import { rateLimit } from 'express-rate-limit';
 
 const credentials = z.object({ email: z.string().email().max(320).transform((v) => v.toLowerCase()), password: z.string().min(10).max(200) });
-const registerSchema = credentials.extend({ displayName: z.string().trim().min(2).max(100) });
+const registerSchema = passwordPair.safeExtend({email:credentials.shape.email, displayName: z.string().trim().min(2).max(100) });
 type UserRow = RowDataPacket & { id: number; email: string; display_name: string; password_hash: string | null; role: 'player' | 'admin' };
 
 export const authRouter = Router();
+const recoveryLimit=rateLimit({windowMs:15*60*1000,limit:10,standardHeaders:'draft-8',legacyHeaders:false,message:{error:'Too many password recovery attempts. Try again in 15 minutes.'}});
+const recoveryMessage='If an account exists for that email, a password reset link has been sent.';
+
+authRouter.post('/forgot-password', recoveryLimit, async (request,response)=>{
+  const {email}=z.object({email:credentials.shape.email}).parse(request.body);
+  const connection=await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [users]=await connection.query<UserRow[]>('SELECT id,password_hash FROM users WHERE email=? FOR UPDATE',[email]);
+    const user=users[0];
+    if (user?.password_hash) {
+      const [recent]=await connection.query<RowDataPacket[]>('SELECT user_id FROM password_resets WHERE user_id=? AND created_at>DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 MINUTE)',[user.id]);
+      if (!recent.length) {
+        const token=randomBytes(32).toString('hex');
+        await connection.execute(`INSERT INTO password_resets (user_id,token_hash,expires_at) VALUES (?,?,DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 30 MINUTE))
+          ON DUPLICATE KEY UPDATE token_hash=VALUES(token_hash),expires_at=VALUES(expires_at),created_at=UTC_TIMESTAMP(3)`,[user.id,createHash('sha256').update(token).digest()]);
+        await sendPasswordReset(email,token);
+      }
+    }
+    await connection.commit();
+  } catch(error) {
+    await connection.rollback();
+    // Never log reset links or reveal whether an email belongs to an account.
+    console.error('Password recovery could not be completed. Check database and SMTP availability.');
+  } finally { connection.release(); }
+  response.json({message:recoveryMessage});
+});
+
+authRouter.post('/reset-password', recoveryLimit, async (request,response)=>{
+  const body=passwordPair.safeExtend({token:z.string().regex(/^[a-f0-9]{64}$/)}).parse(request.body);
+  const tokenHash=createHash('sha256').update(body.token).digest();
+  const [tokens]=await pool.query<RowDataPacket[]>('SELECT user_id FROM password_resets WHERE token_hash=? AND expires_at>UTC_TIMESTAMP(3)',[tokenHash]);
+  if (!tokens[0]) throw new HttpError(400,'This reset link is invalid or expired. Request a new one.');
+  const passwordHash=await hashPassword(body.password);
+  const connection=await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const userId=Number(tokens[0].user_id);
+    await connection.query('SELECT id FROM users WHERE id=? FOR UPDATE',[userId]);
+    const [valid]=await connection.query<RowDataPacket[]>('SELECT user_id FROM password_resets WHERE user_id=? AND token_hash=? AND expires_at>UTC_TIMESTAMP(3) FOR UPDATE',[userId,tokenHash]);
+    if (!valid.length) throw new HttpError(400,'This reset link is invalid or expired. Request a new one.');
+    await connection.execute('UPDATE users SET password_hash=? WHERE id=?',[passwordHash,userId]);
+    await connection.execute('DELETE FROM password_resets WHERE user_id=?',[userId]);
+    await connection.execute('DELETE FROM sessions WHERE user_id=?',[userId]);
+    await connection.commit();
+    response.clearCookie(config.SESSION_COOKIE_NAME,{path:'/'});
+    response.json({message:'Password changed. Sign in with your new password.'});
+  } catch(error) { await connection.rollback(); throw error; }
+  finally { connection.release(); }
+});
 
 function setSessionCookie(response: import('express').Response, token: string): void {
   response.cookie(config.SESSION_COOKIE_NAME, token, {

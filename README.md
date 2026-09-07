@@ -26,6 +26,16 @@ The app administrator enters shared final results and scores the week. Winners a
 
 Accounts use salted scrypt password hashes and HTTP-only session cookies.
 
+New passwords and password resets require matching confirmation and 10–128 characters, including uppercase, lowercase, a number, and a special character. Existing accounts can still sign in with their current passwords.
+
+## Local email and password recovery
+
+Run `docker compose up -d` to start MySQL and MailHog, or `docker compose up -d mailhog` to start email alone. MailHog captures local mail on SMTP port 1025; open http://localhost:8025 to read it. It runs separately from the Node app and does not deliver mail to real inboxes.
+
+Use Forgot password on the sign-in screen. Reset links expire after 30 minutes, work once, and invalidate existing sessions when used. Recovery requests are rate-limited and return the same message for known and unknown addresses. Set APP_URL to the address users open; SMTP_HOST, SMTP_PORT, SMTP_SECURE, optional SMTP_USER/SMTP_PASSWORD, and MAIL_FROM configure email delivery. Restart Node after changing these variables. For deployment, configure an actual SMTP provider instead of MailHog.
+
+With local services running, `npm run test:password-reset` checks email delivery, token expiration, single use, and session invalidation using temporary fixtures.
+
 ## Schedules and badges
 
 The app administrator can import a regular season from [nflverse](https://github.com/nflverse/nflverse-data) or upload its games.csv format. Repeated imports update schedules using stable external game IDs. Downloads require outbound internet access from the server. Schedule data is provided under nflverse's published CC-BY-4.0 license.

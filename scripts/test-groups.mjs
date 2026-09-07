@@ -16,7 +16,7 @@ async function call(cookie, path, method = 'GET', body, status = 200) {
   return {data, cookie: response.headers.get('set-cookie')?.split(';')[0]};
 }
 async function register(name) {
-  const result = await call(null, '/api/auth/register', 'POST', {email:`groups-${suffix}-${name}@example.invalid`,displayName:`Test ${name}`,password:'IntegrationPass!2026'},201);
+  const result = await call(null, '/api/auth/register', 'POST', {email:`groups-${suffix}-${name}@example.invalid`,displayName:`Test ${name}`,password:'IntegrationPass!2026',confirmPassword:'IntegrationPass!2026'},201);
   users.push(result.data.id);
   return {...result.data,cookie:result.cookie};
 }
