@@ -152,6 +152,16 @@ header {
 }
 .brand-icon { width: 32px; height: 32px; flex-shrink: 0; }
 .required-mark { color: #b3261e; }
+.member-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:16px 0; border-bottom:1px solid var(--line); }
+.member-row > div { min-width:0; overflow-wrap:anywhere; }
+.member-email { margin:6px 0 0; color:var(--muted); }
+.admin-users { margin:24px 0; min-width:0; }
+#users-search { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
+#users-search label { flex:1 1 220px; margin:0; }
+.users-table-scroll { max-width:100%; overflow-x:auto; }
+.users-table-scroll table { width:100%; text-align:left; border-collapse:collapse; }
+.users-table-scroll th,.users-table-scroll td { padding:12px; border-bottom:1px solid var(--line); }
+.users-pages { display:flex; gap:12px; margin-top:16px; }
 .site-footer { display:flex; flex-wrap:wrap; justify-content:center; gap:16px; padding:24px 20px 100px; }
 .site-footer a { color:var(--green); }
 @media(min-width:761px) { body.signed-in .site-footer { margin-left:250px; } }

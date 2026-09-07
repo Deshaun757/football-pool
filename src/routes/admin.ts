@@ -11,6 +11,16 @@ import { HttpError } from "../lib/http-error.js";
 export const adminRouter = Router();
 adminRouter.use('/admin', requireAuth, requireAdmin);
 
+adminRouter.get('/admin/users', async (request,response) => {
+  const {page,q}=z.object({page:z.coerce.number().int().min(1).max(1000000).default(1),q:z.string().trim().max(100).default('')}).parse(request.query);
+  const filter=`%${q}%`;
+  const [users]=await pool.query(`SELECT u.id,u.display_name AS displayName,u.email,u.role,u.created_at AS createdAt,
+    (SELECT COUNT(*) FROM group_members m WHERE m.user_id=u.id) AS groupCount
+    FROM users u WHERE u.display_name LIKE ? OR u.email LIKE ? ORDER BY u.created_at DESC,u.id DESC LIMIT 50 OFFSET ?`,[filter,filter,(page-1)*50]);
+  const [counts]=await pool.query<import('mysql2').RowDataPacket[]>('SELECT COUNT(*) AS total FROM users WHERE display_name LIKE ? OR email LIKE ?',[filter,filter]);
+  response.json({users,total:Number(counts[0]?.total ?? 0),page,pageSize:50});
+});
+
 adminRouter.get("/admin/teams", async (_request, response) => {
   const [rows] = await pool.query(
     "SELECT id, abbreviation, city, name, logo_url AS logoUrl FROM teams ORDER BY city, name",

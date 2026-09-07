@@ -164,7 +164,7 @@ async function showDashboard() {
       Promise.all([loadPicksBoard(), loadNotifications(), ...(canReview() ? [loadPickReviews()] : [])])
         .catch(error => { $('#group-message').textContent = error.message; });
     }, 15000);
-  if (me.role === "admin") await loadTeams();
+
   if (canReview()) await loadPickReviews();
   showView(activeGroup ? "home" : "groups");
 }
@@ -227,6 +227,7 @@ function showView(view) {
     .forEach((button) =>
       button.classList.toggle("active", button.dataset.view === view),
     );
+  if (view === "admin") loadUsers();
   if (view === "history") renderHistory();
   if (view === "notifications") loadNotifications(true);
   if (view === "reviews") loadPickReviews().catch(error => { $("#review-message").textContent = error.message; });
@@ -585,19 +586,6 @@ async function loadLeaderboard(id) {
     : "";
 }
 
-async function loadTeams() {
-  const teams = await api("/api/admin/teams");
-  document.querySelectorAll("#game-form select").forEach((select) => {
-    select.innerHTML =
-      select.children[0].outerHTML +
-      teams
-        .map(
-          (t) =>
-            `<option value="${t.id}">${esc(t.abbreviation)} — ${esc(t.city)} ${esc(t.name)}</option>`,
-        )
-        .join("");
-  });
-}
 
 $("#schedule-import-form").onsubmit = async (event) => {
   event.preventDefault();
@@ -612,7 +600,7 @@ $("#schedule-import-form").onsubmit = async (event) => {
     });
     $("#admin-message").textContent =
       `Imported ${result.teams} teams, ${result.weeks} weeks, and ${result.games} games.`;
-    await Promise.all([loadTeams(), loadWeeks()]);
+    if (activeGroup) await loadWeeks();
   } catch (error) {
     $("#admin-message").textContent = error.message;
   } finally {
@@ -632,7 +620,7 @@ $("#schedule-file").onchange = async (event) => {
     });
     $("#admin-message").textContent =
       `Imported ${result.teams} teams, ${result.weeks} weeks, and ${result.games} games.`;
-    await Promise.all([loadTeams(), loadWeeks()]);
+    if (activeGroup) await loadWeeks();
   } catch (error) {
     $("#admin-message").textContent = error.message;
   } finally {
@@ -654,32 +642,12 @@ function wireForm(id, path, transform = (body) => body, method = "POST") {
       $("#admin-message").textContent =
         `Saved successfully${result.id ? ` (ID ${result.id})` : ""}.`;
       e.target.reset();
-      if (id === "#team-form") loadTeams();
+
     } catch (error) {
       $("#admin-message").textContent = error.message;
     }
   };
 }
-wireForm("#team-form", "/api/admin/teams");
-wireForm("#season-form", "/api/admin/seasons", (b) => ({
-  ...b,
-  year: Number(b.year),
-}));
-wireForm("#week-form", "/api/admin/weeks", (b) => ({
-  ...b,
-  seasonId: Number(b.seasonId),
-  weekNumber: Number(b.weekNumber),
-  picksLockAt: new Date(b.picksLockAt).toISOString(),
-  status: "open",
-}));
-wireForm("#game-form", "/api/admin/games", (b) => ({
-  ...b,
-  weekId: Number(b.weekId),
-  awayTeamId: Number(b.awayTeamId),
-  homeTeamId: Number(b.homeTeamId),
-  kickoffAt: new Date(b.kickoffAt).toISOString(),
-  isMondayTiebreaker: b.isMondayTiebreaker === "on",
-}));
 wireForm(
   "#result-form",
   (b) => `/api/admin/games/${b.gameId}/result`,
@@ -708,7 +676,17 @@ async function loadGroups() {
   document.querySelectorAll('[data-group-id]').forEach(button => button.onclick = () => selectGroup(Number(button.dataset.groupId)));
   if (activeGroup) {
     const members = await api('/api/groups/' + activeGroup.id + '/members');
-    $('#group-members').innerHTML = members.map(member => `<p>${esc(member.displayName)} · ${member.role === 'commissioner' ? 'Commissioner' : 'Member'}</p>`).join('');
+    $('#group-members').innerHTML = members.map(member => `<div class="member-row"><div><strong>${esc(member.displayName)}</strong><span> · ${member.role === 'commissioner' ? 'Commissioner' : 'Member'}</span>${member.email ? `<p class="member-email">${esc(member.email)}</p>` : ''}</div>${canReview() && member.role !== 'commissioner' ? `<button type="button" data-remove-member="${member.id}">Remove member</button>` : ''}</div>`).join('');
+    document.querySelectorAll('[data-remove-member]').forEach(button => button.onclick = async () => {
+      const member=members.find(member=>String(member.id)===button.dataset.removeMember);
+      if(!confirm(`Remove ${member.displayName} from ${activeGroup.name}? They will lose group access. Existing picks and results will remain. They can rejoin using an active invite code; replace the code in Group commissioner settings if needed.`)) return;
+      button.disabled=true;
+      try {
+        const result=await api(`/api/groups/${activeGroup.id}/members/${member.id}`,{method:'DELETE'});
+        await loadGroups();
+        $('#group-message').textContent=result.message;
+      } catch(error) { $('#group-message').textContent=error.message;button.disabled=false; }
+    });
   } else $('#group-members').textContent = 'Choose a group to see its members.';
 }
 function selectGroup(id) {
@@ -761,4 +739,24 @@ $('#group-invite-form').onsubmit = async event => {
   } catch(error) { $('#invite-message').textContent=error.message; }
   finally { button.disabled=false; }
 };
+let usersPage=1, usersQuery='', usersRequest=0;
+async function loadUsers() {
+  const request=++usersRequest;
+  $('#users-status').textContent='Loading registered users...';
+  $('#users-prev').disabled=true;
+  $('#users-next').disabled=true;
+  $('#users-rows').replaceChildren();
+  try {
+    const result=await api('/api/admin/users?'+new URLSearchParams({page:String(usersPage),q:usersQuery}));
+    if(request!==usersRequest) return;
+    $('#users-rows').innerHTML=result.users.map(user=>`<tr><td>${esc(user.id)}</td><td>${esc(user.displayName)}</td><td>${esc(user.email)}</td><td>${user.role==='admin'?'Administrator':'Player'}</td><td>${esc(user.groupCount)}</td><td>${esc(date(user.createdAt))}</td></tr>`).join('');
+    $('#users-status').textContent=result.total?`${result.total} registered users${usersQuery?' matching your search':''}. Page ${result.page} of ${Math.ceil(result.total/result.pageSize)}.`:'No users found.';
+    $('#users-prev').disabled=usersPage<=1;
+    $('#users-next').disabled=usersPage*result.pageSize>=result.total;
+  } catch(error) { if(request===usersRequest) $('#users-status').textContent=error.message; }
+}
+$('#users-search').onsubmit=event=>{event.preventDefault();usersQuery=new FormData(event.target).get('q').trim();usersPage=1;loadUsers();};
+$('#users-refresh').onclick=()=>{usersPage=1;loadUsers();};
+$('#users-prev').onclick=()=>{usersPage--;loadUsers();};
+$('#users-next').onclick=()=>{usersPage++;loadUsers();};
 boot();

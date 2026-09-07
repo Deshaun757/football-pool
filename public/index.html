@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Huddle Pick’em</title>
     <link rel="icon" type="image/svg+xml" href="/huddle-icon.svg?v=9f8c47a70dec8bde" />
-    <link rel="stylesheet" href="/styles.css?v=1ff599a55ec14baa" />
+    <link rel="stylesheet" href="/styles.css?v=85174abed8e370a5" />
   </head>
   <body>
     <header>
@@ -206,7 +206,7 @@
         <section id="admin" class="app-view admin" hidden>
           <div class="section-title">
             <p class="eyebrow">App administration</p>
-            <h2>Build the board</h2>
+            <h2>Schedules and users</h2>
           </div>
           <form id="schedule-import-form" class="panel import-panel">
             <div>
@@ -233,76 +233,14 @@
                 accept=".csv,text/csv"
             /></label>
           </form>
+          <section class="panel admin-users" aria-labelledby="users-title">
+            <h3 id="users-title">Registered users</h3>
+            <form id="users-search"><label>Search name or email<input name="q" type="search" maxlength="100"></label><button>Search</button><button id="users-refresh" type="button">Refresh</button></form>
+            <p id="users-status" role="status"></p>
+            <div class="users-table-scroll" tabindex="0" role="region" aria-label="Registered users table"><table><thead><tr><th scope="col">ID</th><th scope="col">Display name</th><th scope="col">Email</th><th scope="col">App role</th><th scope="col">Groups</th><th scope="col">Registered</th></tr></thead><tbody id="users-rows"></tbody></table></div>
+            <div class="users-pages"><button id="users-prev" type="button" disabled>Previous</button><button id="users-next" type="button" disabled>Next</button></div>
+          </section>
           <div class="admin-grid">
-            <form id="team-form" class="panel">
-              <h3>Add team</h3>
-              <input
-                name="abbreviation"
-                placeholder="BUF"
-                maxlength="5"
-                required
-              /><input name="city" placeholder="Buffalo" required /><input
-                name="name"
-                placeholder="Bills"
-                required
-              /><input
-                name="logoUrl"
-                placeholder="Logo URL (optional)"
-              /><button>Add team</button>
-            </form>
-            <form id="season-form" class="panel">
-              <h3>Add season</h3>
-              <input
-                name="year"
-                type="number"
-                placeholder="2026"
-                required
-              /><input
-                name="name"
-                placeholder="2026 Regular Season"
-                required
-              /><button>Add season</button>
-            </form>
-            <form id="week-form" class="panel">
-              <h3>Add week</h3>
-              <input
-                name="seasonId"
-                type="number"
-                placeholder="Season ID"
-                required
-              /><input
-                name="weekNumber"
-                type="number"
-                placeholder="Week number"
-                required
-              /><input name="name" placeholder="Week 1" required /><label
-                >Locks at<input
-                  name="picksLockAt"
-                  type="datetime-local"
-                  required /></label
-              ><button>Open week</button>
-            </form>
-            <form id="game-form" class="panel">
-              <h3>Add game</h3>
-              <input
-                name="weekId"
-                type="number"
-                placeholder="Week ID"
-                required
-              /><select name="awayTeamId" required>
-                <option value="">Away team</option></select
-              ><select name="homeTeamId" required>
-                <option value="">Home team</option></select
-              ><label
-                >Kickoff<input
-                  name="kickoffAt"
-                  type="datetime-local"
-                  required /></label
-              ><label class="check"
-                ><input name="isMondayTiebreaker" type="checkbox" /> Monday
-                tiebreaker</label
-              ><button>Add game</button>
-            </form>
             <form id="result-form" class="panel">
               <h3>Post result</h3>
               <input
@@ -351,6 +289,6 @@
       </section>
     </main>
     <footer class="site-footer"><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/rules.html">Pool rules</a><a href="/cookies.html">Cookies</a><a href="/support.html">Support &amp; privacy requests</a></footer>
-    <script type="module" src="/app.js?v=e509fc39bad01a72"></script>
+    <script type="module" src="/app.js?v=2885043b9202bd49"></script>
   </body>
 </html>

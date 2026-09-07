@@ -76,7 +76,15 @@ try {
     cookie,
     403,
   );
+  await call('admin/users','GET',undefined,cookie,403);
   await pool.execute("UPDATE users SET role='admin' WHERE id=?", [userId]);
+  await call('admin/users','GET',undefined,undefined,401);
+  const directory=(await call('admin/users?q='+encodeURIComponent(body.email),'GET',undefined,cookie)).data;
+  assert.equal(directory.total,1);
+  assert.equal(directory.users[0].id,userId);
+  assert.deepEqual(Object.keys(directory.users[0]).sort(),['createdAt','displayName','email','groupCount','id','role']);
+  assert.equal((await call('admin/users?q='+encodeURIComponent(body.email)+'&page=2','GET',undefined,cookie)).data.users.length,0);
+  await call('admin/users?page=0','GET',undefined,cookie,400);
   assert.ok(
     (await call("support/admin/requests", "GET", undefined, cookie)).data.some(
       (row) => row.id === requests[0].id,

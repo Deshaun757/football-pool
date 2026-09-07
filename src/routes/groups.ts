@@ -54,11 +54,23 @@ groupsRouter.post('/join', async (request,response) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [rows] = await connection.query<RowDataPacket[]>('SELECT id,joining_enabled FROM pool_groups WHERE invite_code=? FOR UPDATE',[inviteCode]);
+    const [rows] = await connection.query<RowDataPacket[]>('SELECT id,name,joining_enabled FROM pool_groups WHERE invite_code=? FOR UPDATE',[inviteCode]);
     if (!rows[0]) throw new HttpError(404,'Invite code not found');
     const [members] = await connection.query<RowDataPacket[]>('SELECT user_id FROM group_members WHERE group_id=? AND user_id=?',[rows[0].id,request.userId!]);
     if (!members.length && !rows[0].joining_enabled) throw new HttpError(409,'This group is not accepting new members');
     await connection.execute("INSERT INTO group_members (group_id,user_id) VALUES (?,?) ON DUPLICATE KEY UPDATE user_id=VALUES(user_id)",[rows[0].id,request.userId!]);
+    if (!members.length) {
+      const [joiningUsers] = await connection.query<RowDataPacket[]>('SELECT display_name FROM users WHERE id=?',[request.userId!]);
+      const [commissioners] = await connection.query<RowDataPacket[]>(
+        "SELECT u.id,u.email FROM group_members m JOIN users u ON u.id=m.user_id WHERE m.group_id=? AND m.role='commissioner'",[rows[0].id]);
+      for (const commissioner of commissioners) {
+        await queueEmail(connection,{
+          kind:'member_joined',to:commissioner.email,userId:commissioner.id,groupId:rows[0].id,
+          subject:"Huddle Pick'em: a new member joined your group",
+          body:`${joiningUsers[0]?.display_name ?? 'A new player'} joined ${rows[0].name}.\n\nSign in and open My groups to view your members: ${config.APP_URL}`,
+        });
+      }
+    }
     await connection.commit();
     response.json({id:rows[0].id});
   } catch(error) { await connection.rollback(); throw error; }
@@ -99,9 +111,27 @@ groupsRouter.post('/:groupId/invitations', requireGroup, requireCommissioner, as
 });
 
 groupsRouter.get('/:groupId/members', requireGroup, async (request,response) => {
+  const canManage = request.groupRole === 'commissioner' || request.userRole === 'admin';
   const [rows] = await pool.query(
-    `SELECT u.id,u.display_name AS displayName,m.role FROM group_members m
+    `SELECT u.id,u.display_name AS displayName,m.role${canManage ? ',u.email' : ''} FROM group_members m
      JOIN users u ON u.id=m.user_id WHERE m.group_id=? ORDER BY m.role,u.display_name`,[request.groupId!],
   );
   response.json(rows);
+});
+
+groupsRouter.delete('/:groupId/members/:userId', requireGroup, requireCommissioner, async (request,response) => {
+  const userId=z.coerce.number().int().positive().parse(request.params.userId);
+  const db=await pool.getConnection();
+  try {
+    await db.beginTransaction();
+    // Serialize with joining and other membership changes for this group.
+    await db.query('SELECT id FROM pool_groups WHERE id=? FOR UPDATE',[request.groupId!]);
+    const [members]=await db.query<RowDataPacket[]>('SELECT role FROM group_members WHERE group_id=? AND user_id=? FOR UPDATE',[request.groupId!,userId]);
+    if(!members[0]) throw new HttpError(404,'This user is not a member of this group');
+    if(members[0].role==='commissioner') throw new HttpError(409,'The group commissioner cannot be removed');
+    await db.execute('DELETE FROM group_members WHERE group_id=? AND user_id=?',[request.groupId!,userId]);
+    await db.execute("UPDATE email_outbox SET cancelled_at=UTC_TIMESTAMP(3) WHERE group_id=? AND user_id=? AND kind IN ('reminder','results') AND sent_at IS NULL AND cancelled_at IS NULL",[request.groupId!,userId]);
+    await db.commit();
+    response.json({message:'Member removed. Existing entries and results are preserved. They can rejoin with an active invite code.'});
+  } catch(error) {await db.rollback();throw error;} finally {db.release();}
 });

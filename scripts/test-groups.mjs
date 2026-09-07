@@ -45,10 +45,20 @@ try {
   await call(ownerA.cookie,'/api/admin/teams','GET',undefined,403);
   await call(member.cookie,`/api/groups/${a}/weeks`,'GET',undefined,403);
   await call(member.cookie,'/api/groups/join','POST',{inviteCode:'0'.repeat(32)},404);
-  await call(member.cookie,'/api/groups/join','POST',{inviteCode:listA[0].inviteCode});
-  await call(member.cookie,'/api/groups/join','POST',{inviteCode:listA[0].inviteCode});
+  await Promise.all([1,2].map(()=>call(member.cookie,'/api/groups/join','POST',{inviteCode:listA[0].inviteCode})));
+  await call(ownerA.cookie,'/api/groups/join','POST',{inviteCode:listA[0].inviteCode});
+  const [joinMail]=await pool.query("SELECT recipient,body FROM email_outbox WHERE group_id=? AND kind='member_joined'",[a]);
+  assert.equal(joinMail.length,1,'Concurrent joins and existing members must not duplicate notices');
+  assert.equal(joinMail[0].recipient,ownerA.email);
+  assert.ok(joinMail[0].body.includes(member.displayName));
+  assert.ok(joinMail[0].body.includes('Group A'));
   assert.equal((await call(member.cookie,'/api/groups')).data[0].inviteCode,null);
   assert.equal((await call(ownerA.cookie,`/api/groups/${a}/members`)).data.length,2);
+  assert.ok((await call(ownerA.cookie,`/api/groups/${a}/members`)).data.some(row=>row.email===member.email));
+  assert.ok((await call(member.cookie,`/api/groups/${a}/members`)).data.every(row=>!('email' in row)));
+  await call(member.cookie,`/api/groups/${a}/members/${ownerA.id}`,'DELETE',undefined,403);
+  await call(ownerB.cookie,`/api/groups/${a}/members/${member.id}`,'DELETE',undefined,403);
+  await call(ownerA.cookie,`/api/groups/${a}/members/${ownerA.id}`,'DELETE',undefined,409);
   await call(member.cookie,`/api/groups/${a}/reviews`,'GET',undefined,403);
   await call(ownerB.cookie,`/api/groups/${a}/members`,'GET',undefined,403);
   const inviteB=(await call(ownerB.cookie,'/api/groups')).data[0].inviteCode;
@@ -134,6 +144,13 @@ try {
   assert.equal((await call(ownerB.cookie,'/api/groups')).data.find(g=>g.id===b).requirePickApproval,1);
   console.log('PASS: commissioner self-submission, settings permissions, automatic member submission, pending queue preservation, entry limits, closed joining, invite rotation');
   console.log('PASS: create/join, roles, group isolation, review decisions, notifications, independent winners, admin oversight');
+  await call(ownerA.cookie,`/api/groups/${a}/members/${member.id}`,'DELETE');
+  await call(member.cookie,`/api/groups/${a}/members`,'GET',undefined,403);
+  await call(member.cookie,`/api/groups/${b}/members`);
+  const [preserved]=await pool.query('SELECT id FROM entries WHERE group_id=? AND user_id=?',[a,member.id]);
+  assert.ok(preserved.length>0);
+  await call(ownerA.cookie,`/api/groups/${a}/members/${member.id}`,'DELETE',undefined,404);
+  console.log('PASS: commissioner-only email visibility and removal, commissioner protection, preserved entries, revoked group access and unaffected other memberships');
   console.log('PASS: welcome emails, invitation permissions and cooldown, review emails, reminder deduplication, results recipients and rescoring deduplication');
 } finally {
   // Delete only fixtures whose IDs were created by this run.
