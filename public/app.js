@@ -1,4 +1,23 @@
 const $ = (selector) => document.querySelector(selector);
+function removeInviteCodeFromUrl() {
+  if (!window.history?.replaceState) return;
+  const url = new URL(window.location.href);
+  let changed = false;
+  for (const key of Array.from(url.searchParams.keys())) {
+    if (/^(inviteCode|invite_code|code)$/i.test(key)) {
+      url.searchParams.delete(key);
+      changed = true;
+    }
+  }
+  if (url.pathname !== '/reset-password' && /(?:^|[?#&])(inviteCode|invite_code|code)=/i.test(url.hash)) {
+    url.hash = '';
+    changed = true;
+  }
+  if (changed) {
+    history.replaceState(null, document.title, url.pathname + url.search + url.hash);
+  }
+}
+removeInviteCodeFromUrl();
 let me = null,
   registerMode = false,
   currentWeek = null;
