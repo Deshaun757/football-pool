@@ -32,8 +32,13 @@ app.use('/api/groups', groupsRouter);
 app.use('/api/groups/:groupId', requireAuth, requireGroup, entriesRouter, weeksRouter, reviewsRouter, notificationsRouter);
 app.use('/api', adminRouter);
 app.use('/api', (_request, response) => response.status(404).json({ error: 'API route not found' }));
-app.use(express.static(resolve('public')));
-app.get(/.*/, (_request, response) => response.sendFile(resolve('public/index.html')));
+app.use(express.static(resolve('public'), {
+  setHeaders(response) { response.setHeader('Cache-Control', 'no-cache'); },
+}));
+app.get(/.*/, (_request, response) => {
+  response.setHeader('Cache-Control', 'no-cache');
+  response.sendFile(resolve('public/index.html'));
+});
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
   if (error instanceof HttpError) { response.status(error.status).json({ error: error.message }); return; }

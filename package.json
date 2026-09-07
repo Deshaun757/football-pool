@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/version-assets.mjs",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:groups": "npm run build && node scripts/test-groups.mjs",
