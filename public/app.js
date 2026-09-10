@@ -227,7 +227,7 @@ async function showDashboard() {
     boardRefreshTimer = setInterval(() => {
       if (!activeGroup) return;
       if (activeView === "place-picks" && $("#week-detail").hidden) loadWeeks().catch(error=>{ $("#weeks").textContent=error.message; });
-      Promise.all([loadPicksBoard(), loadNotifications(), ...(canReview() ? [loadPickReviews()] : [])])
+      Promise.all([...(activeView === "home" ? [loadPicksBoard()] : []), loadNotifications(), ...(canReview() ? [loadPickReviews()] : [])])
         .catch(error => { $('#group-message').textContent = error.message; });
     }, 15000);
 
@@ -336,8 +336,63 @@ function renderAccount() {
   };
 }
 
+function captureMobilePicksPosition() {
+  const strip = document.querySelector(".mobile-picks");
+  if (!strip) return null;
+  const cards = [...strip.querySelectorAll(".mobile-pick-card")];
+  const stripBounds = strip.getBoundingClientRect();
+  let closestIndex = 0;
+  let closestDistance = Number.POSITIVE_INFINITY;
+  cards.forEach((card, index) => {
+    const bounds = card.getBoundingClientRect();
+    const distance = Math.abs(bounds.left - stripBounds.left);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = index;
+    }
+  });
+  return {
+    left: strip.scrollLeft,
+    index: closestIndex,
+  };
+}
+
+function restoreMobilePicksPosition(position) {
+  if (!position) return;
+  const strip = document.querySelector(".mobile-picks");
+  if (!strip) return;
+  const card = strip.querySelectorAll(".mobile-pick-card")[position.index];
+  requestAnimationFrame(() => {
+    strip.scrollLeft = position.left;
+    if (card && Math.abs(strip.scrollLeft - position.left) > 8) {
+      strip.scrollLeft = card.offsetLeft - strip.offsetLeft;
+    }
+  });
+}
+
+function renderCurrentPicksLeaderboard(entries) {
+  if (!entries.length) return "";
+  const sorted = [...entries].sort((a, b) => {
+    const correctA = a.correctPicks ?? -1;
+    const correctB = b.correctPicks ?? -1;
+    const diffA = a.tiebreakerDifference ?? Number.POSITIVE_INFINITY;
+    const diffB = b.tiebreakerDifference ?? Number.POSITIVE_INFINITY;
+    return correctB - correctA || diffA - diffB || a.displayName.localeCompare(b.displayName);
+  });
+  const rows = sorted
+    .map((entry, index) => {
+      const tiebreakerDifference = entry.tiebreakerDifference ?? "—";
+      const tiebreakerTotal = entry.tiebreakerTotal ?? null;
+      const tiebreakerLabel = tiebreakerTotal === null ? tiebreakerDifference : `${tiebreakerDifference} (${tiebreakerTotal})`;
+      return `<tr><td>${index + 1}. ${esc(entry.displayName)}</td><td>${entry.correctPicks ?? 0}</td><td>${tiebreakerLabel}</td></tr>`;
+    })
+    .join("");
+  return `<section class="current-leaderboard"><h2>Leaderboard</h2><table class="leader-table"><thead><tr><th>Player</th><th>Correct</th><th>Monday diff</th></tr></thead><tbody>${rows}</tbody></table></section>`;
+}
+
 async function loadPicksBoard() {
   try {
+    const mobilePicksPosition = captureMobilePicksPosition();
     const board = await api("/api/picks-board");
     const winners=board.winners ?? [];
     $('#week-winners').hidden=!winners.length;
@@ -354,6 +409,7 @@ async function loadPicksBoard() {
         : "No week is currently available";
       $("#picks-board").innerHTML =
         '<p class="empty-board">No previous locked week is available yet. This board will reveal the current week automatically when its deadline passes.</p>';
+      $("#current-leaderboard-slot").innerHTML = "";
       return;
     }
     $("#board-title").textContent = `${board.displayWeek.name} picks`;
@@ -392,7 +448,7 @@ async function loadPicksBoard() {
       )
       .join("");
     const mobileCards = board.games
-      .map((game) => {
+      .map((game, index) => {
         const winner = winnerId(game);
         const playerPicks = board.entries
           .map((entry) => {
@@ -415,17 +471,20 @@ async function loadPicksBoard() {
             ? `${game.awayScore}–${game.homeScore}`
             : "AT";
         const kickoff = `${easternDay(game.kickoffAt).slice(0, 3)} ${easternTime(game.kickoffAt)} ET`;
-        return `<article class="mobile-pick-card"><div class="mobile-matchup"><div>${game.awayLogoUrl ? `<img src="${esc(game.awayLogoUrl)}" alt="">` : ""}<strong>${esc(game.awayAbbreviation)}</strong></div><span><b>${score}</b><small>${game.status === "final" ? "Final" : kickoff}</small></span><div>${game.homeLogoUrl ? `<img src="${esc(game.homeLogoUrl)}" alt="">` : ""}<strong>${esc(game.homeAbbreviation)}</strong></div></div><ul>${playerPicks}</ul><p class="mobile-swipe-hint">Swipe for next matchup →</p></article>`;
+        return `<article class="mobile-pick-card" data-game-count="${index + 1} of ${board.games.length}"><div class="mobile-matchup"><div>${game.awayLogoUrl ? `<img src="${esc(game.awayLogoUrl)}" alt="">` : ""}<strong>${esc(game.awayAbbreviation)}</strong></div><span><b>${score}</b><small>${game.status === "final" ? "Final" : kickoff}</small></span><div>${game.homeLogoUrl ? `<img src="${esc(game.homeLogoUrl)}" alt="">` : ""}<strong>${esc(game.homeAbbreviation)}</strong></div></div><ul>${playerPicks}</ul><p class="mobile-swipe-hint">Swipe for next matchup →</p></article>`;
       })
       .join("");
     $("#picks-board").innerHTML =
       `<p class="meta">Scores and picks for ${esc(board.displayWeek.name)}.</p>${!board.entries.length ? '<p class="meta">No approved entries for this week. Game scores are shown below.</p>' : ""}<table class="picks-table"><thead><tr><th>Player</th>${headers}<th>Tiebreaker</th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-picks">${mobileCards}</div>`;
+    $("#current-leaderboard-slot").innerHTML = renderCurrentPicksLeaderboard(board.entries);
+    restoreMobilePicksPosition(mobilePicksPosition);
   } catch (error) {
     if (me)
       $('#week-winners').hidden=true;
     if (me)
       $("#picks-board").innerHTML =
         `<p class="empty-board">${esc(error.message)}</p>`;
+      $("#current-leaderboard-slot").innerHTML = "";
   }
 }
 function weekIsPlayable(week) {
@@ -463,7 +522,7 @@ function renderHistory() {
     ? myEntriesData
         .map(
           (entry) =>
-            `<article class="history-card" data-week-id="${entry.weekId}" data-entry-id="${entry.id}"><div><span class="pill">${esc(entry.status)}</span><h2>${esc(entry.weekName)} · Entry ${entry.entryNumber}</h2><p class="meta">${entry.submittedAt ? `Submitted ${date(entry.submittedAt)}` : "Draft entry"}</p></div><div class="history-score"><strong>${entry.correctPicks ?? "—"}</strong><span>correct</span></div><div class="history-score"><strong>${entry.tiebreakerDifference ?? "—"}</strong><span>tiebreak diff</span></div></article>`,
+            `<article class="history-card" data-week-id="${entry.weekId}" data-entry-id="${entry.id}"><div><span class="pill">${esc(entry.status)}</span><h2>${esc(entry.weekName)} · Entry ${entry.entryNumber}</h2><p class="meta">${entry.submittedAt ? `Submitted ${date(entry.submittedAt)}` : "Draft entry"}</p></div><div class="history-score"><strong>${entry.correctPicks ?? (entry.status === "submitted" ? 0 : "—")}</strong><span>correct</span></div><div class="history-score"><strong>${entry.tiebreakerDifference ?? "—"}</strong><span>tiebreak diff</span></div></article>`,
         )
         .join("")
     : '<p class="empty-board">You have not created an entry yet. Choose Place Picks from the menu to get started.</p>';
@@ -697,7 +756,12 @@ async function loadPickReviews() {
 async function loadLeaderboard(id) {
   const rows = await api(`/api/weeks/${id}/leaderboard`);
   $("#leaderboard").innerHTML = rows.length
-    ? `<h2>Leaderboard</h2><table class="leader-table"><thead><tr><th>Player</th><th>Correct</th><th>Monday diff</th></tr></thead><tbody>${rows.map((r, i) => `<tr><td>${i + 1}. ${esc(r.displayName)}</td><td>${r.correctPicks ?? "—"}</td><td>${r.tiebreakerDifference ?? "—"}</td></tr>`).join("")}</tbody></table>`
+    ? `<h2>Leaderboard</h2><table class="leader-table"><thead><tr><th>Player</th><th>Correct</th><th>Monday diff</th></tr></thead><tbody>${rows.map((r, i) => {
+        const tiebreakerDifference = r.tiebreakerDifference ?? "—";
+        const tiebreakerTotal = r.tiebreakerTotal ?? null;
+        const tiebreakerLabel = tiebreakerTotal === null ? tiebreakerDifference : `${tiebreakerDifference} (${tiebreakerTotal})`;
+        return `<tr><td>${i + 1}. ${esc(r.displayName)}</td><td>${r.correctPicks ?? 0}</td><td>${tiebreakerLabel}</td></tr>`;
+      }).join("")}</tbody></table>`
     : "";
 }
 
@@ -906,12 +970,14 @@ async function loadResultGames() {
         $('#results-week').disabled=true;$('#finalize-week').disabled=true;
         const body={awayScore:Number(form.elements.awayScore.value),homeScore:Number(form.elements.homeScore.value)};
         try {
-          await api(`/api/admin/games/${form.dataset.game}/result`,{method:'PATCH',body:JSON.stringify(body)});
+          const savedResult = await api(`/api/admin/games/${form.dataset.game}/result`,{method:'PATCH',body:JSON.stringify(body)});
           const game=resultGames.find(g=>String(g.id)===form.dataset.game);Object.assign(game,body,{status:'final'});
           form.dataset.dirty=String(Number(form.elements.awayScore.value)!==body.awayScore || Number(form.elements.homeScore.value)!==body.homeScore);
           form.querySelector('.game-save-message').textContent='Final score saved. Finalize the week to calculate or update results.';
           button.textContent='Save correction';
-          if(activeGroup) await loadPicksBoard();
+          const refreshes = activeGroup ? [loadPicksBoard(), loadHistory()] : [];
+          if (currentWeek?.week?.id === Number(savedResult.weekId)) refreshes.push(loadLeaderboard(savedResult.weekId));
+          await Promise.all(refreshes);
         } catch(error){form.querySelector('.game-save-message').textContent=error.message;}
         finally {setResultBusy(false);}
       };
@@ -929,7 +995,9 @@ $('#finalize-week').onclick=async()=>{
     const result=await api(`/api/admin/weeks/${weekId}/score`,{method:'POST'});
     await loadResultWeeks();
     $('#finalize-message').textContent=`Week finalized: ${result.winners} winning entries across all groups. Results emails queued where applicable.`;
-    if(activeGroup) await loadWeeks();
+    const refreshes = activeGroup ? [loadWeeks(), loadPicksBoard()] : [];
+    if (currentWeek?.week?.id === Number(weekId)) refreshes.push(loadLeaderboard(weekId));
+    await Promise.all(refreshes);
   } catch(error){$('#finalize-message').textContent=error.message;updateFinalizeButton();}
   finally {setResultBusy(false);}
 };

@@ -1,9 +1,9 @@
 import { Router } from "express";
-import type { ResultSetHeader } from "mysql2";
+import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { z } from "zod";
 import { pool } from "../db/pool.js";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
-import { scoreWeek } from "../services/score-week.js";
+import { scoreWeek, updateWeekLeaderboard } from "../services/score-week.js";
 import { importScheduleCsv } from "../services/import-schedule.js";
 import { fetchScheduleCsv } from "../services/fetch-schedule.js";
 import { HttpError } from "../lib/http-error.js";
@@ -11,6 +11,8 @@ import { previousWeeksFinal } from '../services/week-access.js';
 
 export const adminRouter = Router();
 adminRouter.use('/admin', requireAuth, requireAdmin);
+
+type GameWeekRow = RowDataPacket & { weekId: number };
 
 adminRouter.get('/admin/weeks',async (_request,response)=>{
   const [weeks]=await pool.query(`SELECT w.id,w.name,w.week_number AS weekNumber,s.year,w.status,w.picks_lock_at AS picksLockAt,
@@ -140,7 +142,13 @@ adminRouter.patch("/admin/games/:gameId/result", async (request, response) => {
     [body.awayScore, body.homeScore, gameId],
   );
   if(!updated.affectedRows) throw new HttpError(404,'Game not found');
-  response.json({ id: gameId, status: "final" });
+  const [games] = await pool.query<GameWeekRow[]>(
+    "SELECT week_id AS weekId FROM games WHERE id=?",
+    [gameId],
+  );
+  const weekId = games[0]?.weekId;
+  if (weekId) await updateWeekLeaderboard(weekId);
+  response.json({ id: gameId, weekId, status: "final" });
 });
 adminRouter.post("/admin/weeks/:weekId/score", async (request, response) => {
   const weekId = z.coerce

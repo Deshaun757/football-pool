@@ -84,9 +84,10 @@ weeksRouter.get("/picks-board", async (request, response) => {
     [displayWeek.id],
   );
   const [entries] = await pool.query<BoardEntryRow[]>(
-    `SELECT e.id, CONCAT(u.display_name,' · Entry ',e.entry_number) AS displayName, e.tiebreaker_total AS tiebreakerTotal
+    `SELECT e.id, CONCAT(u.display_name,' · Entry ',e.entry_number) AS displayName, e.tiebreaker_total AS tiebreakerTotal,
+      COALESCE(e.correct_picks,0) AS correctPicks, e.tiebreaker_difference AS tiebreakerDifference
      FROM entries e JOIN users u ON u.id=e.user_id WHERE e.week_id=? AND e.group_id=? AND e.status='submitted'
-     ORDER BY u.display_name`,
+     ORDER BY COALESCE(e.correct_picks,0) DESC, e.tiebreaker_difference ASC, e.submitted_at ASC, u.display_name`,
     [displayWeek.id, request.groupId],
   );
   const [picks] = await pool.query<BoardPickRow[]>(
@@ -142,7 +143,9 @@ weeksRouter.get("/weeks", async (request, response) => {
 weeksRouter.get("/my-entries", async (request, response) => {
   const [rows] = await pool.query(
     `SELECT e.id, e.week_id AS weekId, e.entry_number AS entryNumber, e.label, e.status,
-      e.tiebreaker_total AS tiebreakerTotal, e.correct_picks AS correctPicks,
+      e.tiebreaker_total AS tiebreakerTotal,
+      CASE WHEN w.picks_lock_at <= UTC_TIMESTAMP(3) OR EXISTS (SELECT 1 FROM games g WHERE g.week_id=w.id AND g.status='final')
+        THEN COALESCE(e.correct_picks,0) ELSE e.correct_picks END AS correctPicks,
       e.tiebreaker_difference AS tiebreakerDifference, e.submitted_at AS submittedAt,
       w.name AS weekName, w.week_number AS weekNumber, w.picks_lock_at AS picksLockAt
      FROM entries e JOIN weeks w ON w.id=e.week_id WHERE e.user_id=? AND e.group_id=?
@@ -204,13 +207,17 @@ weeksRouter.get("/weeks/:weekId/leaderboard", async (request, response) => {
     .positive()
     .parse(request.params.weekId);
   const [rows] = await pool.query(
-    `SELECT CONCAT(u.display_name,' · Entry ',e.entry_number) AS displayName, e.correct_picks AS correctPicks,
+    `SELECT CONCAT(u.display_name,' · Entry ',e.entry_number) AS displayName,
+      CASE WHEN w.picks_lock_at <= UTC_TIMESTAMP(3) OR EXISTS (SELECT 1 FROM games g WHERE g.week_id=w.id AND g.status='final')
+        THEN COALESCE(e.correct_picks,0) ELSE e.correct_picks END AS correctPicks,
       CASE WHEN w.picks_lock_at <= UTC_TIMESTAMP(3) THEN e.tiebreaker_total ELSE NULL END AS tiebreakerTotal,
       e.tiebreaker_difference AS tiebreakerDifference
      FROM entries e JOIN users u ON u.id=e.user_id JOIN weeks w ON w.id=e.week_id
 
      WHERE e.week_id=? AND e.group_id=? AND e.status='submitted'
-     ORDER BY e.correct_picks DESC, e.tiebreaker_difference ASC, e.submitted_at ASC`,
+     ORDER BY CASE WHEN w.picks_lock_at <= UTC_TIMESTAMP(3) OR EXISTS (SELECT 1 FROM games g WHERE g.week_id=w.id AND g.status='final')
+        THEN COALESCE(e.correct_picks,0) ELSE e.correct_picks END DESC,
+      e.tiebreaker_difference ASC, e.submitted_at ASC`,
     [weekId, request.groupId],
   );
   response.json(rows);

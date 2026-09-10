@@ -10,6 +10,34 @@ type WeekRow = RowDataPacket & { id: number };
 type EntryScoreRow = RowDataPacket & { entry_id: number; group_id: number; tiebreaker_total: number; correct_picks: number };
 type TotalRow = RowDataPacket & { actual_total: number | null };
 
+export async function updateWeekLeaderboard(weekId: number): Promise<void> {
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [weeks] = await connection.query<WeekRow[]>('SELECT id FROM weeks WHERE id = ? FOR UPDATE', [weekId]);
+    if (!weeks[0]) throw new HttpError(404, 'Week not found');
+    const [totals] = await connection.query<TotalRow[]>(
+      'SELECT home_score + away_score AS actual_total FROM games WHERE week_id = ? AND is_monday_tiebreaker = TRUE AND status = \'final\'', [weekId]
+    );
+    const actualTotal = totals[0]?.actual_total;
+    const [scores] = await connection.query<EntryScoreRow[]>(
+      `SELECT e.id AS entry_id, e.group_id, e.tiebreaker_total,
+        SUM(CASE WHEN g.status = 'final' AND ((g.home_score > g.away_score AND p.selected_team_id = g.home_team_id)
+          OR (g.away_score > g.home_score AND p.selected_team_id = g.away_team_id)) THEN 1 ELSE 0 END) AS correct_picks
+       FROM entries e JOIN picks p ON p.entry_id = e.id JOIN games g ON g.id = p.game_id
+       WHERE e.week_id = ? AND e.status = 'submitted' GROUP BY e.id, e.group_id, e.tiebreaker_total`, [weekId]
+    );
+    for (const row of scores) {
+      await connection.execute(
+        'UPDATE entries SET correct_picks = ?, tiebreaker_difference = ? WHERE id = ?',
+        [Number(row.correct_picks), actualTotal == null ? null : Math.abs(row.tiebreaker_total - actualTotal), row.entry_id],
+      );
+    }
+    await connection.commit();
+  } catch (error) { await connection.rollback(); throw error; }
+  finally { connection.release(); }
+}
+
 export async function scoreWeek(weekId: number): Promise<{ winners: number }> {
   const connection = await pool.getConnection();
   try {

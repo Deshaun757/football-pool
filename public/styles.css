@@ -749,6 +749,23 @@ textarea {
   padding: 14px;
   border-bottom: 1px solid var(--line);
 }
+.current-leaderboard {
+  width: max-content;
+  max-width: 100%;
+  padding: 18px;
+  margin-top: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  overflow-x: auto;
+}
+.current-leaderboard h2 {
+  margin: 0 0 12px;
+}
+.current-leaderboard .leader-table {
+  width: auto;
+  min-width: 520px;
+}
 .admin {
   padding: 48px 6vw;
   border-top: 1px solid var(--line);
@@ -914,6 +931,35 @@ textarea {
     border: 0;
     background: transparent;
   }
+  .current-leaderboard {
+    min-width: 0;
+    width: 100%;
+    margin-top: 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--paper);
+    padding: 14px;
+    overflow-x: hidden;
+  }
+  .current-leaderboard .leader-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+    font-size: 12px;
+  }
+  .current-leaderboard .leader-table th,
+  .current-leaderboard .leader-table td {
+    padding: 10px 7px;
+    overflow-wrap: anywhere;
+  }
+  .current-leaderboard .leader-table th:first-child,
+  .current-leaderboard .leader-table td:first-child {
+    width: 36%;
+  }
+  .current-leaderboard .leader-table th:not(:first-child),
+  .current-leaderboard .leader-table td:not(:first-child) {
+    text-align: right;
+  }
   .picks-table {
     display: none;
   }
@@ -932,12 +978,24 @@ textarea {
     display: none;
   }
   .mobile-pick-card {
+    position: relative;
     flex: 0 0 calc(100vw - 48px);
     scroll-snap-align: center;
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: 14px;
     background: var(--paper);
+  }
+  .mobile-pick-card::before {
+    content: attr(data-game-count);
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 1;
+    color: var(--gold);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
   }
   .mobile-matchup {
     display: grid;
