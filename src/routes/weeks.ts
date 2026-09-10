@@ -95,7 +95,11 @@ weeksRouter.get("/picks-board", async (request, response) => {
         e.tiebreaker_difference
       ) AS tiebreakerDifference
      FROM entries e JOIN users u ON u.id=e.user_id WHERE e.week_id=? AND e.group_id=? AND e.status='submitted'
-     ORDER BY correctPicks DESC, tiebreakerDifference ASC, e.submitted_at ASC, u.display_name`,
+     ORDER BY (
+        SELECT MIN(e2.submitted_at)
+        FROM entries e2
+        WHERE e2.week_id=e.week_id AND e2.group_id=e.group_id AND e2.user_id=e.user_id AND e2.status='submitted'
+      ) ASC, e.user_id ASC, e.entry_number ASC, e.submitted_at ASC, e.id ASC`,
     [displayWeek.id, request.groupId],
   );
   const [picks] = await pool.query<BoardPickRow[]>(
