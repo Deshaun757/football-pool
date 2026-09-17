@@ -390,6 +390,41 @@ function setupMobileBoardViewSwitch() {
   setMobileBoardView(mobileBoardView);
 }
 
+function printCurrentPicksBoard(board) {
+  const matchupHeaders = board.games
+    .map(game => `<th>${esc(game.awayAbbreviation)} @ ${esc(game.homeAbbreviation)}</th>`)
+    .join("");
+  const entryRows = board.entries
+    .map(entry => `<tr><th>${esc(entry.displayName)}</th>${board.games
+      .map(game => {
+        const pick = entry.picks[String(game.id)];
+        return `<td>${pick ? esc(pick.selectedAbbreviation) : "—"}</td>`;
+      })
+      .join("")}<td>${esc(entry.tiebreakerTotal)}</td></tr>`)
+    .join("");
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    alert("Allow pop-ups for Huddle Pick’em, then try printing again.");
+    return;
+  }
+  printWindow.opener = null;
+  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(board.displayWeek.name)} picks</title><style>
+    @page { size: landscape; margin: 0.35in; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #10281d; font-family: Arial, sans-serif; }
+    header { margin-bottom: 14px; }
+    h1 { margin: 0 0 4px; font-size: 22px; }
+    p { margin: 0; color: #52635a; font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8px; }
+    th, td { padding: 6px 3px; border: 1px solid #bcc8c0; text-align: center; overflow-wrap: anywhere; }
+    thead th { background: #14583f; color: white; }
+    thead th:first-child, tbody th { width: 105px; text-align: left; }
+    tbody th { background: #eef3ef; }
+    tbody tr:nth-child(even) td { background: #f8faf8; }
+  </style></head><body><header><h1>Huddle Pick’em · ${esc(board.displayWeek.name)}</h1><p>${esc(activeGroup?.name ?? "Current group")} · Full picks board</p></header><table><thead><tr><th>Entry</th>${matchupHeaders}<th>Tiebreaker</th></tr></thead><tbody>${entryRows}</tbody></table><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),100));<\/script></body></html>`);
+  printWindow.document.close();
+}
+
 function renderCurrentPicksLeaderboard(entries) {
   if (!entries.length) return "";
   const sorted = [...entries].sort((a, b) => {
@@ -495,8 +530,9 @@ async function loadPicksBoard() {
       })
       .join("");
     $("#picks-board").innerHTML =
-      `<p class="meta">Scores and picks for ${esc(board.displayWeek.name)}.</p>${!board.entries.length ? '<p class="meta">No approved entries for this week. Game scores are shown below.</p>' : ""}<div class="mobile-board-view-switch" role="group" aria-label="Current picks view"><button type="button" data-mobile-board-view="games">Game view</button><button type="button" data-mobile-board-view="full">Full board</button></div><table class="picks-table"><thead><tr><th>Player</th>${headers}<th>Tiebreaker</th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-picks">${mobileCards}</div>`;
+      `<div class="board-tools"><p class="meta">Scores and picks for ${esc(board.displayWeek.name)}.</p><div class="board-actions"><div class="mobile-board-view-switch" role="group" aria-label="Current picks view"><button type="button" data-mobile-board-view="games">Game view</button><button type="button" data-mobile-board-view="full">Full board</button></div><button type="button" id="print-picks-board" ${board.entries.length ? "" : "disabled"}>Print / save PDF</button></div></div>${!board.entries.length ? '<p class="meta">No approved entries for this week. Game scores are shown below.</p>' : ""}<div class="picks-table-scroll"><table class="picks-table"><thead><tr><th>Player</th>${headers}<th>Tiebreaker</th></tr></thead><tbody>${rows}</tbody></table></div><div class="mobile-picks">${mobileCards}</div>`;
     $("#current-leaderboard-slot").innerHTML = renderCurrentPicksLeaderboard(board.entries);
+    $("#print-picks-board").onclick = () => printCurrentPicksBoard(board);
     setupMobileBoardViewSwitch();
     restoreMobilePicksPosition(mobilePicksPosition);
   } catch (error) {
