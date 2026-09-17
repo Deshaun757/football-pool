@@ -35,6 +35,7 @@ let activeView = "home";
 let weekReturnView = "place-picks";
 let pendingReviewHighlightEntryId = null;
 let settingsMessageTimer = null;
+let mobileBoardView = localStorage.getItem("pickem-mobile-board-view") === "full" ? "full" : "games";
 const esc = (value) =>
   String(value).replace(
     /[&<>'"]/g,
@@ -370,6 +371,25 @@ function restoreMobilePicksPosition(position) {
   });
 }
 
+function setMobileBoardView(view) {
+  mobileBoardView = view === "full" ? "full" : "games";
+  localStorage.setItem("pickem-mobile-board-view", mobileBoardView);
+  const board = $("#picks-board");
+  board.classList.toggle("mobile-full-board", mobileBoardView === "full");
+  board.querySelectorAll("[data-mobile-board-view]").forEach(button => {
+    const selected = button.dataset.mobileBoardView === mobileBoardView;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+}
+
+function setupMobileBoardViewSwitch() {
+  document.querySelectorAll("[data-mobile-board-view]").forEach(button => {
+    button.onclick = () => setMobileBoardView(button.dataset.mobileBoardView);
+  });
+  setMobileBoardView(mobileBoardView);
+}
+
 function renderCurrentPicksLeaderboard(entries) {
   if (!entries.length) return "";
   const sorted = [...entries].sort((a, b) => {
@@ -475,8 +495,9 @@ async function loadPicksBoard() {
       })
       .join("");
     $("#picks-board").innerHTML =
-      `<p class="meta">Scores and picks for ${esc(board.displayWeek.name)}.</p>${!board.entries.length ? '<p class="meta">No approved entries for this week. Game scores are shown below.</p>' : ""}<table class="picks-table"><thead><tr><th>Player</th>${headers}<th>Tiebreaker</th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-picks">${mobileCards}</div>`;
+      `<p class="meta">Scores and picks for ${esc(board.displayWeek.name)}.</p>${!board.entries.length ? '<p class="meta">No approved entries for this week. Game scores are shown below.</p>' : ""}<div class="mobile-board-view-switch" role="group" aria-label="Current picks view"><button type="button" data-mobile-board-view="games">Game view</button><button type="button" data-mobile-board-view="full">Full board</button></div><table class="picks-table"><thead><tr><th>Player</th>${headers}<th>Tiebreaker</th></tr></thead><tbody>${rows}</tbody></table><div class="mobile-picks">${mobileCards}</div>`;
     $("#current-leaderboard-slot").innerHTML = renderCurrentPicksLeaderboard(board.entries);
+    setupMobileBoardViewSwitch();
     restoreMobilePicksPosition(mobilePicksPosition);
   } catch (error) {
     if (me)
@@ -975,9 +996,11 @@ async function loadResultGames() {
           form.dataset.dirty=String(Number(form.elements.awayScore.value)!==body.awayScore || Number(form.elements.homeScore.value)!==body.homeScore);
           form.querySelector('.game-save-message').textContent='Final score saved. Finalize the week to calculate or update results.';
           button.textContent='Save correction';
-          const refreshes = activeGroup ? [loadPicksBoard(), loadHistory()] : [];
+          const refreshes = activeGroup ? [loadPicksBoard(), loadWeeks()] : [];
           if (currentWeek?.week?.id === Number(savedResult.weekId)) refreshes.push(loadLeaderboard(savedResult.weekId));
-          await Promise.all(refreshes);
+          const refreshResults = await Promise.allSettled(refreshes);
+          const refreshError = refreshResults.find(result => result.status === 'rejected');
+          if (refreshError) console.error('Score saved, but refreshed data could not be loaded.', refreshError.reason);
         } catch(error){form.querySelector('.game-save-message').textContent=error.message;}
         finally {setResultBusy(false);}
       };

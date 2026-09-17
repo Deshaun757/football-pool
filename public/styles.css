@@ -405,6 +405,9 @@ textarea {
 .mobile-picks {
   display: none;
 }
+.mobile-board-view-switch {
+  display: none;
+}
 .picks-table {
   width: 100%;
   min-width: 900px;
@@ -931,6 +934,26 @@ textarea {
     border: 0;
     background: transparent;
   }
+  .mobile-board-view-switch {
+    display: inline-flex;
+    gap: 3px;
+    margin: 4px 0 12px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: var(--paper);
+  }
+  .mobile-board-view-switch button {
+    padding: 7px 10px;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .mobile-board-view-switch button.active {
+    background: var(--green);
+    color: white;
+  }
   .current-leaderboard {
     min-width: 0;
     width: 100%;
@@ -961,6 +984,23 @@ textarea {
     text-align: right;
   }
   .picks-table {
+    display: none;
+  }
+  .picks-board.mobile-full-board {
+    overflow-x: auto;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--paper);
+    -webkit-overflow-scrolling: touch;
+  }
+  .picks-board.mobile-full-board > .meta,
+  .picks-board.mobile-full-board .mobile-board-view-switch {
+    margin-left: 12px;
+  }
+  .picks-board.mobile-full-board .picks-table {
+    display: table;
+  }
+  .picks-board.mobile-full-board .mobile-picks {
     display: none;
   }
   .mobile-picks {
