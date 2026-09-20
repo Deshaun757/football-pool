@@ -383,6 +383,24 @@ function setMobileBoardView(view) {
   });
 }
 
+function capturePicksBoardPosition() {
+  return {
+    mobile: captureMobilePicksPosition(),
+    fullBoardLeft: document.querySelector(".picks-table-scroll")?.scrollLeft ?? null,
+  };
+}
+
+function restorePicksBoardPosition(position) {
+  if (!position) return;
+  restoreMobilePicksPosition(position.mobile);
+  const fullBoard = document.querySelector(".picks-table-scroll");
+  if (fullBoard && position.fullBoardLeft !== null) {
+    requestAnimationFrame(() => {
+      fullBoard.scrollLeft = position.fullBoardLeft;
+    });
+  }
+}
+
 function setupMobileBoardViewSwitch() {
   document.querySelectorAll("[data-mobile-board-view]").forEach(button => {
     button.onclick = () => setMobileBoardView(button.dataset.mobileBoardView);
@@ -447,7 +465,6 @@ function renderCurrentPicksLeaderboard(entries) {
 
 async function loadPicksBoard() {
   try {
-    const mobilePicksPosition = captureMobilePicksPosition();
     const board = await api("/api/picks-board");
     const winners=board.winners ?? [];
     $('#week-winners').hidden=!winners.length;
@@ -529,12 +546,15 @@ async function loadPicksBoard() {
         return `<article class="mobile-pick-card" data-game-count="${index + 1} of ${board.games.length}"><div class="mobile-matchup"><div>${game.awayLogoUrl ? `<img src="${esc(game.awayLogoUrl)}" alt="">` : ""}<strong>${esc(game.awayAbbreviation)}</strong></div><span><b>${score}</b><small>${game.status === "final" ? "Final" : kickoff}</small></span><div>${game.homeLogoUrl ? `<img src="${esc(game.homeLogoUrl)}" alt="">` : ""}<strong>${esc(game.homeAbbreviation)}</strong></div></div><ul>${playerPicks}</ul><p class="mobile-swipe-hint">Swipe for next matchup →</p></article>`;
       })
       .join("");
+    // Capture immediately before replacing the board so scrolling that happens
+    // while the refresh request is in flight is preserved.
+    const picksBoardPosition = capturePicksBoardPosition();
     $("#picks-board").innerHTML =
       `<div class="board-tools"><p class="meta">Scores and picks for ${esc(board.displayWeek.name)}.</p><div class="board-actions"><div class="mobile-board-view-switch" role="group" aria-label="Current picks view"><button type="button" data-mobile-board-view="games">Game view</button><button type="button" data-mobile-board-view="full">Full board</button></div><button type="button" id="print-picks-board" ${board.entries.length ? "" : "disabled"}>Print / save PDF</button></div></div>${!board.entries.length ? '<p class="meta">No approved entries for this week. Game scores are shown below.</p>' : ""}<div class="picks-table-scroll"><table class="picks-table"><thead><tr><th>Player</th>${headers}<th>Tiebreaker</th></tr></thead><tbody>${rows}</tbody></table></div><div class="mobile-picks">${mobileCards}</div>`;
     $("#current-leaderboard-slot").innerHTML = renderCurrentPicksLeaderboard(board.entries);
     $("#print-picks-board").onclick = () => printCurrentPicksBoard(board);
     setupMobileBoardViewSwitch();
-    restoreMobilePicksPosition(mobilePicksPosition);
+    restorePicksBoardPosition(picksBoardPosition);
   } catch (error) {
     if (me)
       $('#week-winners').hidden=true;
