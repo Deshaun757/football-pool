@@ -90,7 +90,7 @@ weeksRouter.get("/picks-board", async (request, response) => {
           AND ((g2.home_score > g2.away_score AND p2.selected_team_id=g2.home_team_id)
             OR (g2.away_score > g2.home_score AND p2.selected_team_id=g2.away_team_id))) AS correctPicks,
       COALESCE(
-        (SELECT ABS(e.tiebreaker_total - (g3.home_score + g3.away_score))
+        (SELECT ABS(CAST(e.tiebreaker_total AS SIGNED) - CAST(g3.home_score + g3.away_score AS SIGNED))
           FROM games g3 WHERE g3.week_id=e.week_id AND g3.is_monday_tiebreaker=TRUE AND g3.status='final' LIMIT 1),
         e.tiebreaker_difference
       ) AS tiebreakerDifference
@@ -163,7 +163,7 @@ weeksRouter.get("/my-entries", async (request, response) => {
               OR (g2.away_score > g2.home_score AND p2.selected_team_id=g2.away_team_id)))
         ELSE e.correct_picks END AS correctPicks,
       COALESCE(
-        (SELECT ABS(e.tiebreaker_total - (g3.home_score + g3.away_score))
+        (SELECT ABS(CAST(e.tiebreaker_total AS SIGNED) - CAST(g3.home_score + g3.away_score AS SIGNED))
           FROM games g3 WHERE g3.week_id=e.week_id AND g3.is_monday_tiebreaker=TRUE AND g3.status='final' LIMIT 1),
         e.tiebreaker_difference
       ) AS tiebreakerDifference, e.submitted_at AS submittedAt,
@@ -236,7 +236,7 @@ weeksRouter.get("/weeks/:weekId/leaderboard", async (request, response) => {
         ELSE e.correct_picks END AS correctPicks,
       CASE WHEN w.picks_lock_at <= UTC_TIMESTAMP(3) THEN e.tiebreaker_total ELSE NULL END AS tiebreakerTotal,
       COALESCE(
-        (SELECT ABS(e.tiebreaker_total - (g3.home_score + g3.away_score))
+        (SELECT ABS(CAST(e.tiebreaker_total AS SIGNED) - CAST(g3.home_score + g3.away_score AS SIGNED))
           FROM games g3 WHERE g3.week_id=e.week_id AND g3.is_monday_tiebreaker=TRUE AND g3.status='final' LIMIT 1),
         e.tiebreaker_difference
       ) AS tiebreakerDifference
