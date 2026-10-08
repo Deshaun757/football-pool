@@ -57,9 +57,9 @@ try {
   assert.ok(joinMail[0].body.includes(member.displayName));
   assert.ok(joinMail[0].body.includes('Group A'));
   assert.equal((await call(member.cookie,'/api/groups')).data[0].inviteCode,null);
-  assert.equal((await call(ownerA.cookie,`/api/groups/${a}/members`)).data.length,2);
-  assert.ok((await call(ownerA.cookie,`/api/groups/${a}/members`)).data.some(row=>row.email===member.email));
-  assert.ok((await call(member.cookie,`/api/groups/${a}/members`)).data.every(row=>!('email' in row)));
+  assert.equal((await call(ownerA.cookie,`/api/groups/${a}/members`)).data.members.length,2);
+  assert.ok((await call(ownerA.cookie,`/api/groups/${a}/members?q=${encodeURIComponent(member.email)}`)).data.members.some(row=>row.email===member.email));
+  assert.ok((await call(member.cookie,`/api/groups/${a}/members?q=${encodeURIComponent(member.email)}`)).data.members.every(row=>!('email' in row)));
   await call(member.cookie,`/api/groups/${a}/members/${ownerA.id}`,'DELETE',undefined,403);
   await call(ownerB.cookie,`/api/groups/${a}/members/${member.id}`,'DELETE',undefined,403);
   await call(ownerA.cookie,`/api/groups/${a}/members/${ownerA.id}`,'DELETE',undefined,409);

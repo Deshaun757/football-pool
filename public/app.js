@@ -888,6 +888,42 @@ $("#schedule-file").onchange = async (event) => {
 function formObject(form) {
   return Object.fromEntries(new FormData(form));
 }
+let groupMembersPage=1, groupMembersQuery='', groupMembersRequest=0;
+async function loadGroupMembers() {
+  const request=++groupMembersRequest;
+  $('#group-members-status').textContent=activeGroup?'Loading group members...':'Choose a group to see its members.';
+  $('#group-members-prev').disabled=true;
+  $('#group-members-next').disabled=true;
+  $('#group-members').replaceChildren();
+  if(!activeGroup) return;
+  try {
+    const result=await api('/api/groups/'+activeGroup.id+'/members?'+new URLSearchParams({page:String(groupMembersPage),q:groupMembersQuery}));
+    if(request!==groupMembersRequest) return;
+    $('#group-members-search-label').textContent=result.canManage?'Search display name or email':'Search display name';
+    if(!result.members.length && result.total && groupMembersPage>1) {
+      groupMembersPage=Math.max(1,Math.ceil(result.total/result.pageSize));
+      await loadGroupMembers();
+      return;
+    }
+    $('#group-members').innerHTML=result.members.map(member=>`<tr><td>${esc(member.displayName)}</td><td>${member.email?esc(member.email):'<span class="meta">Hidden</span>'}</td><td>${member.role==='commissioner'?'Commissioner':'Member'}</td><td>${canReview() && member.role!=='commissioner'?`<button type="button" data-remove-member="${member.id}">Remove</button>`:'—'}</td></tr>`).join('');
+    const totalPages=Math.max(1,Math.ceil(result.total/result.pageSize));
+    $('#group-members-status').textContent=result.total?`${result.total} group members${groupMembersQuery?' matching your search':''}. Page ${result.page} of ${totalPages}.`:'No group members found.';
+    $('#group-members-prev').disabled=groupMembersPage<=1;
+    $('#group-members-next').disabled=groupMembersPage*result.pageSize>=result.total;
+    document.querySelectorAll('[data-remove-member]').forEach(button=>button.onclick=async()=>{
+      const member=result.members.find(item=>String(item.id)===button.dataset.removeMember);
+      if(!member || !confirm(`Remove ${member.displayName} from ${activeGroup.name}? They will lose group access. Existing picks and results will remain. They can rejoin using an active invite code; replace the code in Group commissioner settings if needed.`)) return;
+      button.disabled=true;
+      try {
+        const removal=await api(`/api/groups/${activeGroup.id}/members/${member.id}`,{method:'DELETE'});
+        await loadGroups();
+        $('#group-message').textContent=removal.message;
+      } catch(error) { $('#group-message').textContent=error.message;button.disabled=false; }
+    });
+  } catch(error) {
+    if(request===groupMembersRequest) $('#group-members-status').textContent=error.message;
+  }
+}
 async function loadGroups() {
   groups = await api('/api/groups');
   const saved = Number(localStorage.getItem('pickem-group-' + me.id));
@@ -907,26 +943,17 @@ async function loadGroups() {
   $('#group-settings-form').elements.joiningEnabled.checked = !!activeGroup?.joiningEnabled;
   $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
   document.querySelectorAll('[data-group-id]').forEach(button => button.onclick = () => selectGroup(Number(button.dataset.groupId)));
-  if (activeGroup) {
-    const members = await api('/api/groups/' + activeGroup.id + '/members');
-    $('#group-members').innerHTML = members.map(member => `<div class="member-row"><div><strong>${esc(member.displayName)}</strong><span> · ${member.role === 'commissioner' ? 'Commissioner' : 'Member'}</span>${member.email ? `<p class="member-email">${esc(member.email)}</p>` : ''}</div>${canReview() && member.role !== 'commissioner' ? `<button type="button" data-remove-member="${member.id}">Remove member</button>` : ''}</div>`).join('');
-    document.querySelectorAll('[data-remove-member]').forEach(button => button.onclick = async () => {
-      const member=members.find(member=>String(member.id)===button.dataset.removeMember);
-      if(!confirm(`Remove ${member.displayName} from ${activeGroup.name}? They will lose group access. Existing picks and results will remain. They can rejoin using an active invite code; replace the code in Group commissioner settings if needed.`)) return;
-      button.disabled=true;
-      try {
-        const result=await api(`/api/groups/${activeGroup.id}/members/${member.id}`,{method:'DELETE'});
-        await loadGroups();
-        $('#group-message').textContent=result.message;
-      } catch(error) { $('#group-message').textContent=error.message;button.disabled=false; }
-    });
-  } else $('#group-members').textContent = 'Choose a group to see its members.';
+  await loadGroupMembers();
 }
 function selectGroup(id) {
   localStorage.setItem('pickem-group-' + me.id, String(id));
   location.reload();
 }
 $('#group-select').onchange = event => selectGroup(Number(event.target.value));
+$('#group-members-search').onsubmit=event=>{event.preventDefault();groupMembersQuery=new FormData(event.target).get('q').trim();groupMembersPage=1;loadGroupMembers();};
+$('#group-members-refresh').onclick=()=>{groupMembersPage=1;loadGroupMembers();};
+$('#group-members-prev').onclick=()=>{groupMembersPage--;loadGroupMembers();};
+$('#group-members-next').onclick=()=>{groupMembersPage++;loadGroupMembers();};
 $('#group-settings-form').elements.reviewSubmissionMessage.addEventListener('input', updateReviewMessageCount);
 for (const [id,path] of [['create-group-form','/api/groups'],['join-group-form','/api/groups/join']]) {
   $('#' + id).onsubmit = async event => {

@@ -8,6 +8,19 @@ import { previousWeeksFinal } from './week-access.js';
 import { errorFields, logger } from '../lib/logger.js';
 
 type Database = Pick<PoolConnection, 'execute' | 'query'>;
+export function formatEasternDateTime(value: Date | string): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  }).format(new Date(value));
+}
+
 export async function queueEmail(db:Database, message:{key?:string;to:string;subject:string;body:string;kind:string;userId?:number;groupId?:number;weekId?:number;expiresAt?:Date}) {
   await db.execute(`INSERT INTO email_outbox (event_key,recipient,subject,body,kind,user_id,group_id,week_id,expires_at)
     VALUES (?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE event_key=VALUES(event_key)`,
@@ -46,7 +59,7 @@ export async function queueReminders(db:Database) {
     WHERE u.reminder_emails=TRUE AND ${previousWeeksFinal('w')} AND EXISTS (SELECT 1 FROM games WHERE week_id=w.id)
     AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.user_id=u.id AND e.group_id=g.id AND e.week_id=w.id AND e.status IN ('submitted','pending_review'))`);
   for(const row of rows) await queueEmail(db,{key:`reminder:${row.groupId}:${row.weekId}:${row.id}`,kind:'reminder',to:row.email,userId:row.id,groupId:row.groupId,weekId:row.weekId,expiresAt:row.picks_lock_at,
-    subject:"Huddle Pick'em: picks close soon",body:`Remember to submit your ${row.weekName} picks for ${row.name}.\n\nPicks lock at ${new Date(row.picks_lock_at).toISOString()} (UTC).\n\nMake your picks: ${config.APP_URL}`});
+    subject:"Huddle Pick'em: picks close soon",body:`Remember to submit your ${row.weekName} picks for ${row.name}.\n\nPicks lock on ${formatEasternDateTime(row.picks_lock_at)}.\n\nMake your picks: ${config.APP_URL}`});
 }
 
 let running=false;

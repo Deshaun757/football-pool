@@ -119,11 +119,25 @@ groupsRouter.post('/:groupId/invitations', requireGroup, requireCommissioner, as
 
 groupsRouter.get('/:groupId/members', requireGroup, async (request,response) => {
   const canManage = request.groupRole === 'commissioner' || request.userRole === 'admin';
+  const {page,q}=z.object({
+    page:z.coerce.number().int().min(1).max(1000000).default(1),
+    q:z.string().trim().max(100).default(''),
+  }).parse(request.query);
+  const filter=`%${q}%`;
+  const searchClause=canManage ? '(u.display_name LIKE ? OR u.email LIKE ?)' : 'u.display_name LIKE ?';
+  const searchValues=canManage ? [filter,filter] : [filter];
   const [rows] = await pool.query(
     `SELECT u.id,u.display_name AS displayName,m.role${canManage ? ',u.email' : ''} FROM group_members m
-     JOIN users u ON u.id=m.user_id WHERE m.group_id=? ORDER BY m.role,u.display_name`,[request.groupId!],
+     JOIN users u ON u.id=m.user_id WHERE m.group_id=? AND ${searchClause}
+     ORDER BY CASE WHEN m.role='commissioner' THEN 0 ELSE 1 END,u.display_name,u.id LIMIT 10 OFFSET ?`,
+    [request.groupId!,...searchValues,(page-1)*10],
   );
-  response.json(rows);
+  const [counts]=await pool.query<RowDataPacket[]>(
+    `SELECT COUNT(*) AS total FROM group_members m JOIN users u ON u.id=m.user_id
+     WHERE m.group_id=? AND ${searchClause}`,
+    [request.groupId!,...searchValues],
+  );
+  response.json({members:rows,total:Number(counts[0]?.total ?? 0),page,pageSize:10,canManage});
 });
 
 groupsRouter.delete('/:groupId/members/:userId', requireGroup, requireCommissioner, async (request,response) => {

@@ -36,9 +36,9 @@ adminRouter.get('/admin/users', async (request,response) => {
   const filter=`%${q}%`;
   const [users]=await pool.query(`SELECT u.id,u.display_name AS displayName,u.email,u.role,u.created_at AS createdAt,
     (SELECT COUNT(*) FROM group_members m WHERE m.user_id=u.id) AS groupCount
-    FROM users u WHERE u.display_name LIKE ? OR u.email LIKE ? ORDER BY u.created_at DESC,u.id DESC LIMIT 50 OFFSET ?`,[filter,filter,(page-1)*50]);
+    FROM users u WHERE u.display_name LIKE ? OR u.email LIKE ? ORDER BY u.created_at DESC,u.id DESC LIMIT 10 OFFSET ?`,[filter,filter,(page-1)*10]);
   const [counts]=await pool.query<import('mysql2').RowDataPacket[]>('SELECT COUNT(*) AS total FROM users WHERE display_name LIKE ? OR email LIKE ?',[filter,filter]);
-  response.json({users,total:Number(counts[0]?.total ?? 0),page,pageSize:50});
+  response.json({users,total:Number(counts[0]?.total ?? 0),page,pageSize:10});
 });
 
 adminRouter.get("/admin/teams", async (_request, response) => {
