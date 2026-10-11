@@ -131,6 +131,14 @@ const easternTime = (value) =>
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(value));
+const easternDateTimeInput = (value) => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(value));
+  const part = (type) => parts.find(item => item.type === type).value;
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}`;
+};
 
 async function boot() {
   if (location.pathname === "/reset-password") {
@@ -1066,11 +1074,24 @@ async function loadResultGames() {
     const games=await api(`/api/admin/weeks/${weekId}/games`);
     if(request!==resultRequest)return;
     resultGames=games;
-    $('#results-games').innerHTML=games.map(g=>`<form class="game-score-form" data-game="${g.id}"><h4>${esc(g.awayName)} at ${esc(g.homeName)}</h4><p class="meta">${esc(date(g.kickoffAt))}${g.isTiebreaker?' - Monday tiebreaker':''}</p><div class="score-fields"><label>${esc(g.awayName)} (away)<input type="number" name="awayScore" min="0" max="200" step="1" required value="${g.awayScore ?? ''}"></label><label>${esc(g.homeName)} (home)<input type="number" name="homeScore" min="0" max="200" step="1" required value="${g.homeScore ?? ''}"></label><button>${g.status==='final'?'Save correction':'Save final score'}</button></div><p class="game-save-message" role="status">${esc(g.status)}</p></form>`).join('');
+    $('#results-games').innerHTML=games.map(g=>`<form class="game-score-form" data-game="${g.id}"><h4>${esc(g.awayName)} at ${esc(g.homeName)}</h4><div class="kickoff-fields"><label>Kickoff time (Eastern)<input type="datetime-local" name="kickoffAt" value="${easternDateTimeInput(g.kickoffAt)}"></label><button type="button" class="save-kickoff">Update kickoff</button></div><div class="score-fields"><label>${esc(g.awayName)} (away)<input type="number" name="awayScore" min="0" max="200" step="1" required value="${g.awayScore ?? ''}"></label><label>${esc(g.homeName)} (home)<input type="number" name="homeScore" min="0" max="200" step="1" required value="${g.homeScore ?? ''}"></label><button type="submit">${g.status==='final'?'Save correction':'Save final score'}</button></div><p class="game-save-message" role="status">${esc(g.status)}</p></form>`).join('');
     document.querySelectorAll('.game-score-form').forEach(form=>{
-      form.oninput=()=>{form.dataset.dirty='true';updateFinalizeButton();};
+      form.elements.awayScore.oninput=form.elements.homeScore.oninput=()=>{form.dataset.dirty='true';updateFinalizeButton();};
+      form.querySelector('.save-kickoff').onclick=async()=>{
+        if(resultBusy)return;
+        setResultBusy(true);
+        try {
+          const result=await api(`/api/admin/games/${form.dataset.game}/kickoff`,{method:'PATCH',body:JSON.stringify({kickoffAt:form.elements.kickoffAt.value})});
+          const game=resultGames.find(g=>String(g.id)===form.dataset.game);
+          if(game)game.kickoffAt=result.kickoffAt;
+          form.elements.kickoffAt.value=easternDateTimeInput(result.kickoffAt);
+          form.querySelector('.game-save-message').textContent=`Kickoff updated to ${easternDate(result.kickoffAt)} at ${easternTime(result.kickoffAt)} ET.`;
+          if(activeGroup)await Promise.allSettled([loadWeeks(),loadPicksBoard()]);
+        } catch(error){form.querySelector('.game-save-message').textContent=error.message;}
+        finally {setResultBusy(false);}
+      };
       form.onsubmit=async event=>{
-        event.preventDefault();if(resultBusy)return;setResultBusy(true);const button=form.querySelector('button');button.disabled=true;
+        event.preventDefault();if(resultBusy)return;setResultBusy(true);const button=form.querySelector('button[type="submit"]');button.disabled=true;
         $('#results-week').disabled=true;$('#finalize-week').disabled=true;
         const body={awayScore:Number(form.elements.awayScore.value),homeScore:Number(form.elements.homeScore.value)};
         try {

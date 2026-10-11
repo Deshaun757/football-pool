@@ -8,6 +8,7 @@ import { importScheduleCsv } from "../services/import-schedule.js";
 import { fetchScheduleCsv } from "../services/fetch-schedule.js";
 import { HttpError } from "../lib/http-error.js";
 import { previousWeeksFinal } from '../services/week-access.js';
+import { DateTime } from 'luxon';
 
 export const adminRouter = Router();
 adminRouter.use('/admin', requireAuth, requireAdmin);
@@ -124,6 +125,15 @@ adminRouter.post("/admin/games", async (request, response) => {
     ],
   );
   response.status(201).json({ id: result.insertId });
+});
+adminRouter.patch('/admin/games/:gameId/kickoff', async (request,response) => {
+  const gameId=z.coerce.number().int().positive().parse(request.params.gameId);
+  const {kickoffAt}=z.object({kickoffAt:z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)}).parse(request.body);
+  const eastern=DateTime.fromISO(kickoffAt,{zone:'America/New_York'});
+  if(!eastern.isValid) throw new HttpError(400,'Enter a valid Eastern kickoff date and time');
+  const [updated]=await pool.execute<ResultSetHeader>('UPDATE games SET kickoff_at=? WHERE id=?',[eastern.toUTC().toJSDate(),gameId]);
+  if(!updated.affectedRows) throw new HttpError(404,'Game not found');
+  response.json({id:gameId,kickoffAt:eastern.toUTC().toISO()});
 });
 adminRouter.patch("/admin/games/:gameId/result", async (request, response) => {
   const gameId = z.coerce
