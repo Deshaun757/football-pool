@@ -14,7 +14,7 @@ This branch prepares the existing web application for a later Capacitor iOS targ
 ## Remaining iOS work
 
 1. [x] Add authenticated in-app account deletion and document retention behavior.
-2. Create stable App Review commissioner/member demo accounts and sample content.
+2. [x] Create stable App Review commissioner/member demo accounts and sample content.
 3. [x] Introduce a configurable API base URL and a mobile-safe authentication flow.
 4. [x] Add Capacitor, generate the iOS project, and store native sessions in iOS Keychain.
 5. [x] Add app icons, launch assets, native sharing, deep links, and lifecycle handling.
@@ -23,6 +23,12 @@ This branch prepares the existing web application for a later Capacitor iOS targ
 8. Complete App Store privacy disclosures, screenshots, review notes, and submission.
 
 Do not point a native build at production until the API-origin and mobile-session work is complete. The current same-origin cookie flow intentionally remains unchanged during Step 1.
+
+## Step 2: App Review sample data
+
+Create the commissioner and member accounts normally, put them in exactly one shared review group, and assign the expected roles. Configure `APP_REVIEW_COMMISSIONER_EMAIL` and `APP_REVIEW_MEMBER_EMAIL`, deploy a fresh build, then run `npm run app-review:setup` from the deployed application directory over SSH.
+
+The command uses the next accessible open schedule week to create a submitted commissioner entry and a member entry awaiting approval. When a finalized week exists, it also creates scored pick history and a winner for that group. It sends no email, stores no passwords, changes no other group, and is safe to rerun. The entire operation rolls back if the accounts, shared group, roles, or open schedule week are not ready.
 
 ## Step 4: Capacitor iOS project
 

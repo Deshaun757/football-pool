@@ -12,6 +12,7 @@
     "test:password-reset": "npm run build && node scripts/test-password-reset.mjs",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed-demo": "tsx src/db/seed-demo.ts",
+    "app-review:setup": "node dist/db/setup-app-review.js",
     "ios:build": "node scripts/build-ios.mjs",
     "ios:sync": "npm run ios:build && cap sync ios",
     "ios:open": "npm run ios:sync && cap open ios"
