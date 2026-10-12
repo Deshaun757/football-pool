@@ -16,10 +16,16 @@ This branch prepares the existing web application for a later Capacitor iOS targ
 1. [x] Add authenticated in-app account deletion and document retention behavior.
 2. Create stable App Review commissioner/member demo accounts and sample content.
 3. [x] Introduce a configurable API base URL and a mobile-safe authentication flow.
-4. Add Capacitor and generate the Xcode project on macOS.
+4. [x] Add Capacitor, generate the iOS project, and store native sessions in iOS Keychain.
 5. Add app icons, launch assets, native sharing, deep links, and lifecycle handling.
 6. Add Apple Push Notification service registration and notification preferences.
 7. Test on physical iPhones and distribute a release candidate through TestFlight.
 8. Complete App Store privacy disclosures, screenshots, review notes, and submission.
 
 Do not point a native build at production until the API-origin and mobile-session work is complete. The current same-origin cookie flow intentionally remains unchanged during Step 1.
+
+## Step 4: Capacitor iOS project
+
+The website and iOS app share the files in `public`, but `npm run ios:build` creates a separate ignored `ios-web` bundle. That bundle enables native mode, points API requests to `https://huddlepickem.com`, and includes the Keychain-backed session bridge. Set `IOS_API_URL` when building to target another HTTPS API.
+
+Use `npm run ios:sync` after changing web files or native plugins. On a Mac with Xcode installed, use `npm run ios:open`, select the Redcrows Solutions Apple development team, and choose a simulator or connected iPhone. The generated `ios` project is committed; the generated `ios-web` files are rebuilt locally and are not committed.

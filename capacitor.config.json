@@ -1,0 +1,12 @@
+{
+  "appId": "com.redcrowssolutions.huddlepickem",
+  "appName": "Huddle Pick'em",
+  "webDir": "ios-web",
+  "server": {
+    "iosScheme": "capacitor"
+  },
+  "ios": {
+    "contentInset": "automatic",
+    "backgroundColor": "#f6f1e7"
+  }
+}
