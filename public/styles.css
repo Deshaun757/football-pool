@@ -692,6 +692,11 @@ textarea {
   object-fit: contain;
   margin: 0 auto 8px;
 }
+.danger-zone { margin-top:28px; padding-top:24px; border-top:1px solid #d7aaa7; }
+.danger-zone h2 { color:#8a2020; }
+.danger-zone p { line-height:1.55; }
+.danger-button { background:#9b2828; }
+.danger-button:hover { background:#7f1f1f; }
 .group-bar {
   display: flex;
   align-items: flex-end;

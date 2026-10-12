@@ -327,7 +327,7 @@ function showView(view) {
 
 function renderAccount() {
   $("#account-card").innerHTML =
-    `<form id="account-profile-form"><label>Display name<input name="displayName" autocomplete="name" minlength="2" maxlength="40" pattern="[A-Za-z0-9 .&'-]+" title="Use 2-40 characters: letters, numbers, spaces, apostrophes, hyphens, periods, and ampersands." required value="${esc(me.displayName)}"></label><button type="submit">Save display name</button><p id="account-message" role="status"></p></form><dl class="account-details"><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl><p><a href="/support.html">Email preferences, support &amp; privacy requests</a></p>`;
+    `<form id="account-profile-form"><label>Display name<input name="displayName" autocomplete="name" minlength="2" maxlength="40" pattern="[A-Za-z0-9 .&'-]+" title="Use 2-40 characters: letters, numbers, spaces, apostrophes, hyphens, periods, and ampersands." required value="${esc(me.displayName)}"></label><button type="submit">Save display name</button><p id="account-message" role="status"></p></form><dl class="account-details"><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl><p><a href="/support.html">Email preferences, support &amp; privacy requests</a></p><section class="danger-zone" aria-labelledby="delete-account-title"><h2 id="delete-account-title">Delete account</h2><p>This permanently deletes your profile, picks, entries, notifications, support requests, and stored email records. Groups with other members will be transferred to another member. Empty groups will be deleted.</p><form id="delete-account-form"><label>Current password<input name="password" type="password" autocomplete="current-password" maxlength="200" required></label><label>Type DELETE to confirm<input name="confirmation" autocomplete="off" autocapitalize="characters" spellcheck="false" pattern="DELETE" required></label><button class="danger-button" type="submit">Permanently delete account</button><p id="delete-account-message" role="status"></p></form></section>`;
   $("#account-profile-form").onsubmit = async (event) => {
     event.preventDefault();
     const button = event.target.querySelector("button");
@@ -409,6 +409,18 @@ function capturePicksBoardPosition() {
   return {
     mobile: captureMobilePicksPosition(),
     fullBoardLeft: document.querySelector(".picks-table-scroll")?.scrollLeft ?? null,
+  };
+  $("#delete-account-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form=event.currentTarget,button=form.querySelector('button');
+    if(form.elements.confirmation.value!=='DELETE') { $('#delete-account-message').textContent='Type DELETE exactly to continue.';return; }
+    if(!confirm('Permanently delete your Huddle Pick\'em account and associated data? This cannot be undone.'))return;
+    button.disabled=true;$('#delete-account-message').textContent='Deleting your account...';
+    try {
+      await api('/api/auth/me',{method:'DELETE',body:JSON.stringify({password:form.elements.password.value,confirmation:form.elements.confirmation.value})});
+      localStorage.removeItem('pickem-group-'+me.id);
+      location.href='/';
+    } catch(error) { $('#delete-account-message').textContent=error.message;button.disabled=false; }
   };
 }
 

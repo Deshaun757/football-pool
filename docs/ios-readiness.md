@@ -13,7 +13,7 @@ This branch prepares the existing web application for a later Capacitor iOS targ
 
 ## Remaining iOS work
 
-1. Add authenticated in-app account deletion and document retention behavior.
+1. [x] Add authenticated in-app account deletion and document retention behavior.
 2. Create stable App Review commissioner/member demo accounts and sample content.
 3. Introduce a configurable API base URL and a mobile-safe authentication flow.
 4. Add Capacitor and generate the Xcode project on macOS.

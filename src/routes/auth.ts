@@ -14,6 +14,7 @@ import { sendPasswordReset } from '../services/email.js';
 import { queueEmail } from '../services/email-outbox.js';
 import { rateLimit } from 'express-rate-limit';
 import { errorFields, logger } from '../lib/logger.js';
+import { deleteAccount } from '../services/delete-account.js';
 
 const credentials = z.object({ email: z.string().email().max(320).transform((v) => v.toLowerCase()), password: z.string().min(10).max(200) });
 const registerSchema = passwordPair.safeExtend({email:credentials.shape.email, displayName: displayNameSchema, acceptTerms:z.literal(true) });
@@ -21,6 +22,7 @@ type UserRow = RowDataPacket & { id: number; email: string; display_name: string
 
 export const authRouter = Router();
 const recoveryLimit=rateLimit({windowMs:15*60*1000,limit:10,standardHeaders:'draft-8',legacyHeaders:false,message:{error:'Too many password recovery attempts. Try again in 15 minutes.'}});
+const accountDeletionLimit=rateLimit({windowMs:15*60*1000,limit:5,standardHeaders:'draft-8',legacyHeaders:false,message:{error:'Too many account deletion attempts. Try again in 15 minutes.'}});
 const recoveryMessage='If an account exists for that email, a password reset link has been sent.';
 
 authRouter.post('/forgot-password', recoveryLimit, async (request,response)=>{
@@ -92,7 +94,7 @@ authRouter.post('/register', async (request, response) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const [result] = await connection.execute<ResultSetHeader>(`INSERT INTO users (email, display_name, password_hash, role,terms_version,terms_accepted_at) VALUES (?, ?, ?, ?,'2026-09-06',UTC_TIMESTAMP(3))`, [body.email, body.displayName, passwordHash, role]);
+    const [result] = await connection.execute<ResultSetHeader>(`INSERT INTO users (email, display_name, password_hash, role,terms_version,terms_accepted_at) VALUES (?, ?, ?, ?,'2026-10-11',UTC_TIMESTAMP(3))`, [body.email, body.displayName, passwordHash, role]);
     await queueEmail(connection,{key:`welcome:${result.insertId}`,kind:'welcome',to:body.email,userId:result.insertId,
       subject:"Welcome to Huddle Pick'em!",body:`Hi ${body.displayName},\n\nYour account is ready. Create a group to become its commissioner, or join a group with an invite code.\n\nGet started: ${config.APP_URL}`});
     await connection.commit();
@@ -127,6 +129,22 @@ authRouter.patch('/me', requireAuth, async (request, response) => {
   const [rows] = await pool.query<UserRow[]>('SELECT id, email, display_name, role FROM users WHERE id = ?', [request.userId!]);
   const user = rows[0]!;
   response.json({ id: user.id, email: user.email, displayName: user.display_name, role: user.role });
+});
+
+authRouter.delete('/me', requireAuth, accountDeletionLimit, async (request,response) => {
+  const {password,confirmation}=z.object({password:z.string().min(1).max(200),confirmation:z.literal('DELETE')}).parse(request.body);
+  const connection=await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+    const result=await deleteAccount(connection,request.userId!,password);
+    await connection.commit();
+    response.clearCookie(config.SESSION_COOKIE_NAME,{path:'/'});
+    logger.info('account_deleted',{userId:request.userId,transferredGroups:result.transferredGroups,deletedGroups:result.deletedGroups});
+    response.json({message:'Your account and associated personal data were deleted.',...result});
+  } catch(error) {
+    await connection.rollback();
+    throw error;
+  } finally { connection.release(); }
 });
 
 // A logged-out or expired session is a normal result of the browser's session check.
