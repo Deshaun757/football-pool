@@ -312,7 +312,7 @@ async function showDashboard() {
   $("#admin-menu-item").hidden = me.role !== "admin";
   setupNavigation();
   renderAccount();
-  if(isNativeApp)window.HuddleNative?.refreshPushRegistration?.().catch(error=>console.error('Could not refresh push registration.',error));
+  if(isNativeApp)requestInitialPushPermission().catch(error=>console.error('Could not request push notification permission.',error));
   await loadGroups();
   if (activeGroup) await Promise.all([loadWeeks(), loadPicksBoard(), loadNotifications()]);
   if (!boardRefreshTimer)
@@ -552,6 +552,14 @@ async function setupPushSettings() {
       await api('/api/push/preferences',{method:'PUT',body:JSON.stringify(preferences)});status.textContent='Notification preferences saved.';
     } catch(error){status.textContent=error.message;} finally {button.disabled=false;}
   };
+}
+
+async function requestInitialPushPermission() {
+  const permission=await window.HuddleNative?.enablePush?.();
+  const status=$('#push-status');
+  if(status)status.textContent=permission==='granted'
+    ? 'Notifications are enabled on this device.'
+    : 'Notifications are disabled. You can enable them in iPhone Settings.';
 }
 
 function setMobileBoardView(view) {
