@@ -173,7 +173,7 @@ async function api(path, options = {}) {
   const data = await response.json().catch(() => ({}));
   if(response.status===401 && nativeSessionToken)await clearNativeSession();
   if (!response.ok) throw new Error(data.details?.map(issue => issue.message).join(". ") || data.error || "Something went wrong");
-  if(data.sessionToken) {
+  if(data?.sessionToken) {
     await storeNativeSession(data.sessionToken);
     delete data.sessionToken;
   }
