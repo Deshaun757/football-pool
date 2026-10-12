@@ -42,3 +42,47 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         return config
     }
 }
+
+@objc(HuddlePrintPlugin)
+class HuddlePrintPlugin: CAPPlugin, CAPBridgedPlugin {
+    let identifier = "HuddlePrintPlugin"
+    let jsName = "HuddlePrint"
+    let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "printHtml", returnType: CAPPluginReturnPromise)
+    ]
+
+    @objc func printHtml(_ call: CAPPluginCall) {
+        guard let html = call.getString("html"), !html.isEmpty else {
+            call.reject("HTML is required")
+            return
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let presenter = self?.bridge?.viewController else {
+                call.reject("The print screen is unavailable")
+                return
+            }
+
+            let controller = UIPrintInteractionController.shared
+            let info = UIPrintInfo(dictionary: nil)
+            info.outputType = .general
+            info.jobName = call.getString("jobName") ?? "Huddle Pick'em picks board"
+            info.orientation = .landscape
+            controller.printInfo = info
+            controller.printFormatter = UIMarkupTextPrintFormatter(markupText: html)
+            controller.present(animated: true) { _, completed, error in
+                if let error {
+                    call.reject("Unable to print the picks board", nil, error)
+                } else {
+                    call.resolve(["completed": completed])
+                }
+            }
+        }
+    }
+}
+
+class HuddleBridgeViewController: CAPBridgeViewController {
+    override func capacitorDidLoad() {
+        bridge?.registerPluginInstance(HuddlePrintPlugin())
+    }
+}

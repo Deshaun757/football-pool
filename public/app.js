@@ -616,7 +616,7 @@ function setupMobileBoardViewSwitch() {
   setMobileBoardView(mobileBoardView);
 }
 
-function printCurrentPicksBoard(board) {
+async function printCurrentPicksBoard(board) {
   const matchupHeaders = board.games
     .map(game => `<th>${esc(game.awayAbbreviation)} @ ${esc(game.homeAbbreviation)}</th>`)
     .join("");
@@ -628,6 +628,16 @@ function printCurrentPicksBoard(board) {
       })
       .join("")}<td>${esc(entry.tiebreakerTotal)}</td></tr>`)
     .join("");
+  const title = `Huddle Pick'em · ${board.displayWeek.name}`;
+  const nativePrintHtml = `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:landscape;margin:0.35in}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#102d24}h1{font-size:20px;margin:0 0 4px}p{font-size:11px;margin:0 0 16px}table{border-collapse:collapse;width:100%;font-size:8px}th,td{border:1px solid #9aaba5;padding:4px;text-align:center}thead th,tbody th{background:#eef3ef;font-weight:700}tbody th{text-align:left;white-space:nowrap}</style></head><body><h1>${esc(title)}</h1><p>${esc(activeGroup?.name ?? "Current group")} · Full picks board</p><table><thead><tr><th>Entry</th>${matchupHeaders}<th>Tiebreaker</th></tr></thead><tbody>${entryRows}</tbody></table></body></html>`;
+  if (window.HUDDLE_CONFIG?.nativeApp && window.HuddleNative?.printHtml) {
+    try {
+      await window.HuddleNative.printHtml(nativePrintHtml, `${activeGroup?.name ?? "Huddle Pick'em"} - ${board.displayWeek.name}`);
+    } catch (error) {
+      if (!/cancel/i.test(error?.message ?? "")) alert("The print screen could not be opened. Please try again.");
+    }
+    return;
+  }
   document.querySelector('.print-board-document')?.remove();
   const printDocument=document.createElement('section');
   printDocument.className='print-board-document';
@@ -754,7 +764,7 @@ async function loadPicksBoard() {
     $("#picks-board").innerHTML =
       `<div class="board-tools"><p class="meta">Scores and picks for ${esc(board.displayWeek.name)}.</p><div class="board-actions"><div class="mobile-board-view-switch" role="group" aria-label="Current picks view"><button type="button" data-mobile-board-view="games">Game view</button><button type="button" data-mobile-board-view="full">Full board</button></div><button type="button" id="print-picks-board" ${board.entries.length ? "" : "disabled"}>Print / save PDF</button></div></div>${!board.entries.length ? '<p class="meta">No approved entries for this week. Game scores are shown below.</p>' : ""}<div class="picks-table-scroll"><table class="picks-table"><thead><tr><th>Player</th>${headers}<th>Tiebreaker</th></tr></thead><tbody>${rows}</tbody></table></div><div class="mobile-picks">${mobileCards}</div>`;
     $("#current-leaderboard-slot").innerHTML = renderCurrentPicksLeaderboard(board.entries);
-    $("#print-picks-board").onclick = () => printCurrentPicksBoard(board);
+    $("#print-picks-board").onclick = () => void printCurrentPicksBoard(board);
     setupMobileBoardViewSwitch();
     restorePicksBoardPosition(picksBoardPosition);
   } catch (error) {
@@ -1143,7 +1153,7 @@ async function loadGroups() {
   $('#group-settings-form').elements.reviewSubmissionMessage.value = activeGroup?.reviewSubmissionMessage ?? '';
   updateReviewMessageCount();
   $('#group-settings-form').elements.joiningEnabled.checked = !!activeGroup?.joiningEnabled;
-  $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<div class="invite-code-row"><label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label><button type="button" data-copy-invite="${group.id}">Copy</button></div><button type="button" data-share-group="${group.id}">Share invite</button>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
+  $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<div class="invite-code-row"><label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label><button class="copy-invite-button" type="button" data-copy-invite="${group.id}" aria-label="Copy invite code" title="Copy invite code"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M16 8V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h1"></path></svg></button></div><div class="group-card-actions"><button type="button" data-share-group="${group.id}">Share invite</button><button type="button" data-group-id="${group.id}">Open group</button></div>` : `<div class="group-card-actions"><button type="button" data-group-id="${group.id}">Open group</button></div>`}</article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
   document.querySelectorAll('[data-group-id]').forEach(button => button.onclick = () => selectGroup(Number(button.dataset.groupId)));
   document.querySelectorAll('[data-copy-invite]').forEach(button => button.onclick = async () => {
     const group=groups.find(item=>item.id===Number(button.dataset.copyInvite));
@@ -1151,9 +1161,11 @@ async function loadGroups() {
     button.disabled=true;
     try {
       await copyText(group.inviteCode);
-      button.textContent='Copied';
+      button.classList.add('copied');
+      button.setAttribute('aria-label','Invite code copied');
+      button.title='Copied';
       $('#group-message').textContent='Invite code copied.';
-      setTimeout(()=>{if(button.isConnected)button.textContent='Copy';},2000);
+      setTimeout(()=>{if(button.isConnected){button.classList.remove('copied');button.setAttribute('aria-label','Copy invite code');button.title='Copy invite code';}},2000);
     } catch(error) { $('#group-message').textContent=error.message; }
     finally { button.disabled=false; }
   });
