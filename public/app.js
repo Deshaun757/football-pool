@@ -3,11 +3,24 @@ const runtimeConfig=window.HUDDLE_CONFIG ?? {};
 const apiBaseUrl=String(runtimeConfig.apiBaseUrl ?? '').replace(/\/$/,'');
 const isNativeApp=runtimeConfig.nativeApp===true;
 let nativeSessionToken=null;
+function inviteCodeFromUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(value, window.location.origin);
+    const code = url.searchParams.get('inviteCode') ?? url.searchParams.get('invite_code') ?? url.searchParams.get('code');
+    return /^[a-f0-9]{32}$/i.test(code ?? '') ? code.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+let pendingInviteCode=inviteCodeFromUrl(window.location.href);
 async function initializeNativeSession() {
   if(!isNativeApp)return;
   if(!/^https:\/\//.test(apiBaseUrl)) throw new Error('The iOS API address must use HTTPS.');
   if(!window.HuddleNativeAuth?.getToken) throw new Error('Secure iOS session storage is unavailable.');
   nativeSessionToken=await window.HuddleNativeAuth.getToken();
+  const launchUrl=await window.HuddleNative?.getLaunchUrl?.();
+  pendingInviteCode=inviteCodeFromUrl(launchUrl) ?? pendingInviteCode;
 }
 async function storeNativeSession(token) {
   if(!isNativeApp)return;
@@ -47,6 +60,15 @@ function removeInviteCodeFromUrl() {
   }
 }
 removeInviteCodeFromUrl();
+window.addEventListener('huddle:native-url', event => {
+  const code=inviteCodeFromUrl(event.detail?.url);
+  if(!code)return;
+  pendingInviteCode=code;
+  applyPendingInvite();
+});
+window.addEventListener('huddle:native-resume', () => {
+  refreshAfterResume().catch(error => console.error('Could not refresh app data after resume.', error));
+});
 let me = null,
   registerMode = false,
   currentWeek = null;
@@ -286,7 +308,41 @@ async function showDashboard() {
     }, 15000);
 
   if (canReview()) await loadPickReviews();
-  showView(activeGroup ? "home" : "groups");
+  if (!applyPendingInvite()) showView(activeGroup ? "home" : "groups");
+}
+
+function applyPendingInvite() {
+  if(!pendingInviteCode || !me)return false;
+  const input=$('#join-group-form')?.elements?.inviteCode;
+  if(!input)return false;
+  input.value=pendingInviteCode;
+  showView('groups');
+  $('#group-message').textContent='Invitation ready. Select Join group to continue.';
+  input.focus({preventScroll:true});
+  return true;
+}
+
+let resumeRefreshPromise=null;
+async function refreshAfterResume() {
+  updateNetworkStatus();
+  if(!me || resumeRefreshPromise)return resumeRefreshPromise;
+  resumeRefreshPromise=(async()=>{
+    if(!activeGroup)return loadGroups();
+    const refreshes=[loadNotifications(),loadWeeks()];
+    if(activeView==='home')refreshes.push(loadPicksBoard());
+    if(activeView==='reviews' && canReview())refreshes.push(loadPickReviews());
+    await Promise.all(refreshes);
+  })().finally(()=>{resumeRefreshPromise=null;});
+  return resumeRefreshPromise;
+}
+
+async function shareGroupInvite(group) {
+  const url=`https://huddlepickem.com/?inviteCode=${encodeURIComponent(group.inviteCode)}`;
+  const options={title:`Join ${group.name} on Huddle Pick'em`,text:`Join my ${group.name} pick'em group. Invite code: ${group.inviteCode}`,url};
+  if(window.HuddleNative?.share)return window.HuddleNative.share(options);
+  if(navigator.share)return navigator.share(options);
+  await navigator.clipboard.writeText(`${options.text}\n${url}`);
+  $('#group-message').textContent='Invitation link copied.';
 }
 
 function setupNavigation() {
@@ -1008,8 +1064,16 @@ async function loadGroups() {
   $('#group-settings-form').elements.reviewSubmissionMessage.value = activeGroup?.reviewSubmissionMessage ?? '';
   updateReviewMessageCount();
   $('#group-settings-form').elements.joiningEnabled.checked = !!activeGroup?.joiningEnabled;
-  $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
+  $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label><button type="button" data-share-group="${group.id}">Share invite</button>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
   document.querySelectorAll('[data-group-id]').forEach(button => button.onclick = () => selectGroup(Number(button.dataset.groupId)));
+  document.querySelectorAll('[data-share-group]').forEach(button => button.onclick = async () => {
+    const group=groups.find(item=>item.id===Number(button.dataset.shareGroup));
+    if(!group?.inviteCode)return;
+    button.disabled=true;
+    try { await shareGroupInvite(group); }
+    catch(error) { if(error?.name!=='AbortError')$('#group-message').textContent=error.message; }
+    finally { button.disabled=false; }
+  });
   await loadGroupMembers();
 }
 function selectGroup(id) {

@@ -7,6 +7,10 @@ const schema = z.object({
     .default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
   APP_URL: z.url().default("http://localhost:3000"),
+  APPLE_TEAM_ID: z.preprocess(
+    value => value === '' ? undefined : value,
+    z.string().trim().regex(/^[A-Z0-9]{10}$/).optional(),
+  ),
   MOBILE_APP_ORIGINS: z.string().default('capacitor://localhost').transform(value => value.split(',').map(origin => origin.trim()).filter(Boolean)),
   MYSQL_URL: z.string().min(1),
   SESSION_COOKIE_NAME: z.string().min(1).default("pickem_session"),

@@ -110,8 +110,10 @@ groupsRouter.post('/:groupId/invitations', requireGroup, requireCommissioner, as
     if(recent.length>=20) throw new HttpError(429,'This group has sent 20 invitations this hour. Please try again later.');
     const [duplicate]=await db.query<RowDataPacket[]>(`SELECT id FROM email_outbox WHERE kind='invitation' AND group_id=? AND recipient=? AND created_at>DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 HOUR)`,[request.groupId!,email]);
     if(duplicate.length) throw new HttpError(429,'An invitation was already queued for this address within the last hour.');
+    const invitationUrl=new URL(config.APP_URL);
+    invitationUrl.searchParams.set('inviteCode',group.invite_code);
     await queueEmail(db,{kind:'invitation',to:email,groupId:request.groupId!,expiresAt:new Date(Date.now()+7*86400000),
-      subject:"You're invited to Huddle Pick'em",body:`You're invited to join ${group.name}!\n\nVisit ${config.APP_URL} and sign in or create an account. In My groups, enter this invite code:\n\n${group.invite_code}\n\nThis code works while the commissioner allows joining and keeps this invite code active.`});
+      subject:"You're invited to Huddle Pick'em",body:`You're invited to join ${group.name}!\n\nOpen this invitation and sign in or create an account:\n\n${invitationUrl.toString()}\n\nInvite code: ${group.invite_code}\n\nThis invitation works while the commissioner allows joining and keeps this invite code active.`});
     await db.commit();
     response.status(202).json({message:'Invitation queued for email delivery.'});
   } catch(error) {await db.rollback();throw error;} finally {db.release();}

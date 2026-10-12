@@ -18,6 +18,7 @@ import { requireGroup } from './middleware/group.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { supportRouter } from './routes/support.js';
 import { allowedClientOrigins } from './lib/client-origins.js';
+import { config } from './config.js';
 
 export const app = express();
 app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'https:'] } } }));
@@ -47,6 +48,23 @@ app.use(express.json({ limit: '5mb' }));
 app.use(requireSameOrigin);
 
 app.get('/health', (_request, response) => response.json({ ok: true }));
+app.get('/.well-known/apple-app-site-association', (_request, response) => {
+  if (!config.APPLE_TEAM_ID) {
+    response.status(404).json({ error: 'Apple app association is not configured' });
+    return;
+  }
+  response.setHeader('Content-Type', 'application/json');
+  response.setHeader('Cache-Control', 'public, max-age=3600');
+  response.json({
+    applinks: {
+      apps: [],
+      details: [{
+        appID: `${config.APPLE_TEAM_ID}.com.redcrowssolutions.huddlepickem`,
+        paths: ['/'],
+      }],
+    },
+  });
+});
 app.use('/team-badges', teamBadgesRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/support', supportRouter);
