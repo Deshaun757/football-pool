@@ -346,6 +346,18 @@ function renderAccount() {
       button.disabled = false;
     }
   };
+  $("#delete-account-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form=event.currentTarget,button=form.querySelector('button');
+    if(form.elements.confirmation.value!=='DELETE') { $('#delete-account-message').textContent='Type DELETE exactly to continue.';return; }
+    if(!confirm('Permanently delete your Huddle Pick\'em account and associated data? This cannot be undone.'))return;
+    button.disabled=true;$('#delete-account-message').textContent='Deleting your account...';
+    try {
+      await api('/api/auth/me',{method:'DELETE',body:JSON.stringify({password:form.elements.password.value,confirmation:form.elements.confirmation.value})});
+      localStorage.removeItem('pickem-group-'+me.id);
+      location.href='/';
+    } catch(error) { $('#delete-account-message').textContent=error.message;button.disabled=false; }
+  };
   $("#menu-logout").onclick = async (event) => {
     event.currentTarget.disabled = true;
     $("#logout-error").textContent = "";
@@ -409,18 +421,6 @@ function capturePicksBoardPosition() {
   return {
     mobile: captureMobilePicksPosition(),
     fullBoardLeft: document.querySelector(".picks-table-scroll")?.scrollLeft ?? null,
-  };
-  $("#delete-account-form").onsubmit = async (event) => {
-    event.preventDefault();
-    const form=event.currentTarget,button=form.querySelector('button');
-    if(form.elements.confirmation.value!=='DELETE') { $('#delete-account-message').textContent='Type DELETE exactly to continue.';return; }
-    if(!confirm('Permanently delete your Huddle Pick\'em account and associated data? This cannot be undone.'))return;
-    button.disabled=true;$('#delete-account-message').textContent='Deleting your account...';
-    try {
-      await api('/api/auth/me',{method:'DELETE',body:JSON.stringify({password:form.elements.password.value,confirmation:form.elements.confirmation.value})});
-      localStorage.removeItem('pickem-group-'+me.id);
-      location.href='/';
-    } catch(error) { $('#delete-account-message').textContent=error.message;button.disabled=false; }
   };
 }
 
