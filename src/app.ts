@@ -19,6 +19,7 @@ import { notificationsRouter } from './routes/notifications.js';
 import { supportRouter } from './routes/support.js';
 import { allowedClientOrigins } from './lib/client-origins.js';
 import { config } from './config.js';
+import { pushRouter } from './routes/push.js';
 
 export const app = express();
 app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'https:'] } } }));
@@ -68,6 +69,7 @@ app.get('/.well-known/apple-app-site-association', (_request, response) => {
 app.use('/team-badges', teamBadgesRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/support', supportRouter);
+app.use('/api/push', pushRouter);
 app.use('/api/groups', groupsRouter);
 app.use('/api/groups/:groupId', requireAuth, requireGroup, entriesRouter, weeksRouter, reviewsRouter, notificationsRouter);
 app.use('/api', adminRouter);

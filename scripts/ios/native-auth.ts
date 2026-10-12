@@ -1,8 +1,10 @@
 import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { App } from '@capacitor/app';
 import { Share, type ShareOptions } from '@capacitor/share';
+import { PushNotifications } from '@capacitor/push-notifications';
 
 const SESSION_KEY = 'session-token';
+const PUSH_TOKEN_KEY = 'push-token';
 
 type NativeAuthBridge = {
   getToken(): Promise<string | null>;
@@ -13,6 +15,10 @@ type NativeAuthBridge = {
 type NativeAppBridge = {
   getLaunchUrl(): Promise<string | null>;
   share(options: ShareOptions): Promise<void>;
+  getPushToken(): Promise<string | null>;
+  enablePush(): Promise<'granted'|'denied'>;
+  refreshPushRegistration(): Promise<void>;
+  clearPushToken(): Promise<void>;
 };
 
 declare global {
@@ -44,6 +50,27 @@ window.HuddleNative = {
   async share(options) {
     await Share.share(options);
   },
+
+  async getPushToken() {
+    return SecureStorage.getItem(PUSH_TOKEN_KEY);
+  },
+
+  async enablePush() {
+    let permission=await PushNotifications.checkPermissions();
+    if(permission.receive==='prompt' || permission.receive==='prompt-with-rationale') permission=await PushNotifications.requestPermissions();
+    if(permission.receive!=='granted')return 'denied';
+    await PushNotifications.register();
+    return 'granted';
+  },
+
+  async refreshPushRegistration() {
+    const permission=await PushNotifications.checkPermissions();
+    if(permission.receive==='granted')await PushNotifications.register();
+  },
+
+  async clearPushToken() {
+    await SecureStorage.removeItem(PUSH_TOKEN_KEY);
+  },
 };
 
 void App.addListener('appUrlOpen', ({ url }) => {
@@ -52,4 +79,21 @@ void App.addListener('appUrlOpen', ({ url }) => {
 
 void App.addListener('resume', () => {
   window.dispatchEvent(new CustomEvent('huddle:native-resume'));
+});
+
+void PushNotifications.addListener('registration', async ({ value }) => {
+  await SecureStorage.setItem(PUSH_TOKEN_KEY,value);
+  window.dispatchEvent(new CustomEvent('huddle:push-registration',{detail:{token:value}}));
+});
+
+void PushNotifications.addListener('registrationError', error => {
+  window.dispatchEvent(new CustomEvent('huddle:push-error',{detail:{message:error.error}}));
+});
+
+void PushNotifications.addListener('pushNotificationReceived', notification => {
+  window.dispatchEvent(new CustomEvent('huddle:push-received',{detail:notification}));
+});
+
+void PushNotifications.addListener('pushNotificationActionPerformed', ({ notification }) => {
+  window.dispatchEvent(new CustomEvent('huddle:push-action',{detail:notification.data ?? {}}));
 });

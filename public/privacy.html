@@ -86,6 +86,13 @@
           service. The app does not request precise location, contact lists,
           payment card information, or government identifiers.
         </li>
+        <li>
+          <strong>Push notification information:</strong> if you enable iPhone
+          notifications, we store the device token supplied by Apple, your
+          notification-category choices, delivery queue status, and related
+          group, week, or entry identifiers. We do not use device tokens for
+          advertising or location tracking.
+        </li>
       </ul>
       <h2>3. Why we use information</h2>
       <p>
@@ -128,6 +135,8 @@
         email processing depends on the mailbox/SMTP service configured for the
         deployment. These providers process information needed to deliver their
         services. Your recipient email provider also handles delivered mail.
+        Apple processes device tokens and notification content when push
+        notifications are enabled on an iPhone.
         Sports schedule sources provide game data; importing schedules does not
         require sending player profiles or picks to those sources.
       </p>
@@ -171,7 +180,8 @@
         is active. A signed-in user can permanently delete the account from
         Account info. Deletion removes the profile, entries, picks,
         notifications, support requests, active sessions, password-reset
-        records, and stored email queue records associated with the account.
+        records, push device registrations and preferences, and stored email and
+        push queue records associated with the account.
         Successful email delivery does not remove copies already held by the
         recipient or mail providers.
       </p>

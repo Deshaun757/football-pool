@@ -3,6 +3,8 @@ const runtimeConfig=window.HUDDLE_CONFIG ?? {};
 const apiBaseUrl=String(runtimeConfig.apiBaseUrl ?? '').replace(/\/$/,'');
 const isNativeApp=runtimeConfig.nativeApp===true;
 let nativeSessionToken=null;
+let nativePushToken=null;
+let pendingPushAction=null;
 function inviteCodeFromUrl(value) {
   if (!value) return null;
   try {
@@ -19,6 +21,7 @@ async function initializeNativeSession() {
   if(!/^https:\/\//.test(apiBaseUrl)) throw new Error('The iOS API address must use HTTPS.');
   if(!window.HuddleNativeAuth?.getToken) throw new Error('Secure iOS session storage is unavailable.');
   nativeSessionToken=await window.HuddleNativeAuth.getToken();
+  nativePushToken=await window.HuddleNative?.getPushToken?.() ?? null;
   const launchUrl=await window.HuddleNative?.getLaunchUrl?.();
   pendingInviteCode=inviteCodeFromUrl(launchUrl) ?? pendingInviteCode;
 }
@@ -68,6 +71,18 @@ window.addEventListener('huddle:native-url', event => {
 });
 window.addEventListener('huddle:native-resume', () => {
   refreshAfterResume().catch(error => console.error('Could not refresh app data after resume.', error));
+});
+window.addEventListener('huddle:push-registration',event=>{
+  nativePushToken=event.detail?.token ?? null;
+  if(me && nativePushToken)api('/api/push/devices',{method:'POST',body:JSON.stringify({token:nativePushToken})})
+    .then(()=>{if($('#push-status'))$('#push-status').textContent='Push notifications are enabled on this device.';})
+    .catch(error=>{if($('#push-status'))$('#push-status').textContent=error.message;});
+});
+window.addEventListener('huddle:push-error',event=>{if($('#push-status'))$('#push-status').textContent=event.detail?.message ?? 'Push notification registration failed.';});
+window.addEventListener('huddle:push-received',()=>{if(me && activeGroup)loadNotifications().catch(()=>{});});
+window.addEventListener('huddle:push-action',event=>{
+  pendingPushAction=event.detail ?? {};
+  if(me)handlePushAction(pendingPushAction).catch(error=>console.error('Could not open push notification.',error));
 });
 let me = null,
   registerMode = false,
@@ -297,6 +312,7 @@ async function showDashboard() {
   $("#admin-menu-item").hidden = me.role !== "admin";
   setupNavigation();
   renderAccount();
+  if(isNativeApp)window.HuddleNative?.refreshPushRegistration?.().catch(error=>console.error('Could not refresh push registration.',error));
   await loadGroups();
   if (activeGroup) await Promise.all([loadWeeks(), loadPicksBoard(), loadNotifications()]);
   if (!boardRefreshTimer)
@@ -308,7 +324,22 @@ async function showDashboard() {
     }, 15000);
 
   if (canReview()) await loadPickReviews();
-  if (!applyPendingInvite()) showView(activeGroup ? "home" : "groups");
+  if (!applyPendingInvite()) {
+    if(pendingPushAction)await handlePushAction(pendingPushAction);
+    else showView(activeGroup ? "home" : "groups");
+  }
+}
+
+async function handlePushAction(data) {
+  pendingPushAction=null;
+  const groupId=Number(data?.groupId);
+  if(groupId && groups.some(group=>group.id===groupId) && activeGroup?.id!==groupId) {
+    localStorage.setItem('pickem-group-'+me.id,String(groupId));
+    await loadGroups();
+  }
+  const category=data?.category;
+  const view=category==='review_requests' && canReview()?'reviews':category==='reminders'?'place-picks':category==='results'?'history':category==='group_activity'?'groups':'notifications';
+  showView(view);
 }
 
 function applyPendingInvite() {
@@ -413,8 +444,10 @@ function showView(view) {
 }
 
 function renderAccount() {
+  const pushSettings=isNativeApp?`<section class="push-settings" aria-labelledby="push-settings-title"><h2 id="push-settings-title">Push notifications</h2><p>Choose which updates this iPhone can receive.</p><button id="enable-push" type="button">Enable notifications</button><form id="push-preferences-form" hidden><label class="check"><input name="reminders" type="checkbox"> Pick deadline reminders</label><label class="check"><input name="reviewRequests" type="checkbox"> Entries ready for review</label><label class="check"><input name="decisions" type="checkbox"> Pick approvals and rejections</label><label class="check"><input name="results" type="checkbox"> Weekly results</label><label class="check"><input name="groupActivity" type="checkbox"> Group activity</label><button type="submit">Save notification preferences</button></form><p id="push-status" role="status"></p></section>`:'';
   $("#account-card").innerHTML =
-    `<form id="account-profile-form"><label>Display name<input name="displayName" autocomplete="name" minlength="2" maxlength="40" pattern="[A-Za-z0-9 .&'-]+" title="Use 2-40 characters: letters, numbers, spaces, apostrophes, hyphens, periods, and ampersands." required value="${esc(me.displayName)}"></label><button type="submit">Save display name</button><p id="account-message" role="status"></p></form><dl class="account-details"><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl><p><a href="/support.html">Email preferences, support &amp; privacy requests</a></p><section class="danger-zone" aria-labelledby="delete-account-title"><h2 id="delete-account-title">Delete account</h2><p>This permanently deletes your profile, picks, entries, notifications, support requests, and stored email records. Groups with other members will be transferred to another member. Empty groups will be deleted.</p><form id="delete-account-form"><label>Current password<input name="password" type="password" autocomplete="current-password" maxlength="200" required></label><label>Type DELETE to confirm<input name="confirmation" autocomplete="off" autocapitalize="characters" spellcheck="false" pattern="DELETE" required></label><button class="danger-button" type="submit">Permanently delete account</button><p id="delete-account-message" role="status"></p></form></section>`;
+    `<form id="account-profile-form"><label>Display name<input name="displayName" autocomplete="name" minlength="2" maxlength="40" pattern="[A-Za-z0-9 .&'-]+" title="Use 2-40 characters: letters, numbers, spaces, apostrophes, hyphens, periods, and ampersands." required value="${esc(me.displayName)}"></label><button type="submit">Save display name</button><p id="account-message" role="status"></p></form><dl class="account-details"><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl>${pushSettings}<p><a href="/support.html">Email preferences, support &amp; privacy requests</a></p><section class="danger-zone" aria-labelledby="delete-account-title"><h2 id="delete-account-title">Delete account</h2><p>This permanently deletes your profile, picks, entries, notifications, support requests, and stored email records. Groups with other members will be transferred to another member. Empty groups will be deleted.</p><form id="delete-account-form"><label>Current password<input name="password" type="password" autocomplete="current-password" maxlength="200" required></label><label>Type DELETE to confirm<input name="confirmation" autocomplete="off" autocapitalize="characters" spellcheck="false" pattern="DELETE" required></label><button class="danger-button" type="submit">Permanently delete account</button><p id="delete-account-message" role="status"></p></form></section>`;
+  if(isNativeApp)setupPushSettings();
   $("#account-profile-form").onsubmit = async (event) => {
     event.preventDefault();
     const button = event.target.querySelector("button");
@@ -441,6 +474,8 @@ function renderAccount() {
     button.disabled=true;$('#delete-account-message').textContent='Deleting your account...';
     try {
       await api('/api/auth/me',{method:'DELETE',body:JSON.stringify({password:form.elements.password.value,confirmation:form.elements.confirmation.value})});
+      await window.HuddleNative?.clearPushToken?.();
+      nativePushToken=null;
       await clearNativeSession();
       localStorage.removeItem('pickem-group-'+me.id);
       location.href='/';
@@ -450,7 +485,10 @@ function renderAccount() {
     event.currentTarget.disabled = true;
     $("#logout-error").textContent = "";
     try {
+      if(nativePushToken)await api('/api/push/devices/unregister',{method:'POST',body:JSON.stringify({token:nativePushToken})}).catch(error=>console.error('Could not unregister push device during logout.',error));
       await api("/api/auth/logout", { method: "POST" });
+      await window.HuddleNative?.clearPushToken?.();
+      nativePushToken=null;
       await clearNativeSession();
       location.reload();
     } catch (error) {
@@ -492,6 +530,28 @@ function restoreMobilePicksPosition(position) {
       strip.scrollLeft = card.offsetLeft - strip.offsetLeft;
     }
   });
+}
+
+async function setupPushSettings() {
+  const form=$('#push-preferences-form'),status=$('#push-status'),enable=$('#enable-push');
+  try {
+    const result=await api('/api/push/preferences');
+    for(const [name,value] of Object.entries(result.preferences))if(form.elements[name])form.elements[name].checked=!!value;
+    form.hidden=false;
+    status.textContent=result.configured?'Notification delivery is available.':'Preferences can be saved now. Delivery starts after APNs is configured.';
+  } catch(error) {status.textContent=error.message;}
+  enable.onclick=async()=>{
+    enable.disabled=true;status.textContent='Requesting notification permission...';
+    try {const permission=await window.HuddleNative.enablePush();status.textContent=permission==='granted'?'Registering this device...':'Notifications are disabled in iPhone Settings.';}
+    catch(error){status.textContent=error.message;} finally {enable.disabled=false;}
+  };
+  form.onsubmit=async event=>{
+    event.preventDefault();const button=form.querySelector('button');button.disabled=true;
+    try {
+      const preferences=Object.fromEntries(['reminders','reviewRequests','decisions','results','groupActivity'].map(name=>[name,form.elements[name].checked]));
+      await api('/api/push/preferences',{method:'PUT',body:JSON.stringify(preferences)});status.textContent='Notification preferences saved.';
+    } catch(error){status.textContent=error.message;} finally {button.disabled=false;}
+  };
 }
 
 function setMobileBoardView(view) {

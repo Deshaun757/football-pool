@@ -693,6 +693,9 @@ textarea {
   margin: 0 auto 8px;
 }
 .danger-zone { margin-top:28px; padding-top:24px; border-top:1px solid #d7aaa7; }
+.push-settings { margin-top:28px; padding-top:24px; border-top:1px solid var(--line); }
+.push-settings form { display:grid; gap:10px; margin-top:16px; }
+.push-settings form button { justify-self:start; }
 .danger-zone h2 { color:#8a2020; }
 .danger-zone p { line-height:1.55; }
 .danger-button { background:#9b2828; }

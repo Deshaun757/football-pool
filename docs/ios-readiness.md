@@ -18,7 +18,7 @@ This branch prepares the existing web application for a later Capacitor iOS targ
 3. [x] Introduce a configurable API base URL and a mobile-safe authentication flow.
 4. [x] Add Capacitor, generate the iOS project, and store native sessions in iOS Keychain.
 5. [x] Add app icons, launch assets, native sharing, deep links, and lifecycle handling.
-6. Add Apple Push Notification service registration and notification preferences.
+6. [x] Add Apple Push Notification service registration and notification preferences.
 7. Test on physical iPhones and distribute a release candidate through TestFlight.
 8. Complete App Store privacy disclosures, screenshots, review notes, and submission.
 
@@ -37,3 +37,11 @@ Use `npm run ios:sync` after changing web files or native plugins. On a Mac with
 - The app recognizes `huddlepickem://join?inviteCode=CODE` immediately. HTTPS invitations use `https://huddlepickem.com/?inviteCode=CODE`, which opens the website when the app is unavailable.
 - Set `APPLE_TEAM_ID` to the 10-character Team ID from the Apple Developer portal to serve the Apple association file. The iOS target is prepared for `applinks:huddlepickem.com`; enabling Associated Domains for the App ID and verifying it on a device must be completed later with the Apple account and Xcode.
 - Returning from the background refreshes deadlines, picks, notifications, and commissioner reviews without reloading the whole interface.
+
+## Step 6: push notifications
+
+- Migration `013_push_notifications.sql` creates per-user preferences, registered-device records, and a retryable push outbox. Account deletion removes all three through foreign-key cascades.
+- The iOS Account screen requests notification permission only after the user selects **Enable notifications**. It registers the APNs device token with the signed-in account and removes that device association on logout.
+- Push categories cover deadline reminders, commissioner review requests, approval/rejection decisions, weekly results, and group activity. They are queued from the same transactions as the corresponding service emails.
+- The server sends APNs token-authenticated HTTP/2 requests, retries temporary failures, and removes invalid device tokens. Delivery remains inactive until all APNs environment variables are configured.
+- On the Apple Developer portal, enable Push Notifications for `com.redcrowssolutions.huddlepickem` and create an APNs `.p8` key. Base64-encode the key file and configure `APPLE_TEAM_ID`, `APNS_KEY_ID`, `APNS_PRIVATE_KEY_BASE64`, `APNS_TOPIC`, and `APNS_ENVIRONMENT` in Hostinger. Xcode capability verification and physical-device testing remain part of Step 7.
