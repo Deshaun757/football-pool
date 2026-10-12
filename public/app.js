@@ -634,7 +634,8 @@ async function printCurrentPicksBoard(board) {
     try {
       await window.HuddleNative.printHtml(nativePrintHtml, `${activeGroup?.name ?? "Huddle Pick'em"} - ${board.displayWeek.name}`);
     } catch (error) {
-      if (!/cancel/i.test(error?.message ?? "")) alert("The print screen could not be opened. Please try again.");
+      console.error("Native print failed", error);
+      if (!/cancel/i.test(error?.message ?? "")) alert(`The print screen could not be opened. ${error?.message ?? "Please try again."}`);
     }
     return;
   }
