@@ -17,10 +17,15 @@ import { requireAuth } from './middleware/auth.js';
 import { requireGroup } from './middleware/group.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { supportRouter } from './routes/support.js';
+import { allowedClientOrigins } from './lib/client-origins.js';
 
 export const app = express();
 app.use(helmet({ contentSecurityPolicy: { directives: { imgSrc: ["'self'", 'data:', 'https:'] } } }));
-app.use(cors());
+app.use(cors({
+  credentials:true,
+  origin(origin,callback) { callback(null,!origin || allowedClientOrigins.has(origin)); },
+  allowedHeaders:['Content-Type','Authorization','X-Huddle-Client'],
+}));
 app.use((request, response, next) => {
   const startedAt = performance.now();
   response.on('finish', () => {

@@ -38,6 +38,8 @@ The app administrator enters shared final results and scores the week. Winners a
 
 Accounts use salted scrypt password hashes and HTTP-only session cookies.
 
+The browser keeps using same-origin HTTP-only cookies. The future Capacitor iOS client uses the same revocable `sessions` records through bearer tokens returned only when both the configured native origin and `X-Huddle-Client: ios` are present. `MOBILE_APP_ORIGINS` controls allowed native origins and defaults to `capacitor://localhost`. CORS and mutation-origin checks use the same allowlist. The bundled `public/runtime-config.js` leaves website API requests relative; the native build must replace it with the HTTPS production API URL and provide `window.HuddleNativeAuth` backed by iOS Keychain storage. Never substitute browser local storage for that bridge.
+
 Signed-in users can permanently delete their account from Account info after re-entering their password and typing `DELETE`. Deletion runs in one database transaction and removes the profile, entries, picks, notifications, sessions, reset tokens, support requests, schedule-import attribution, and stored email addressed to the user. A commissioned group with remaining members transfers to its longest-standing member; an empty group is deleted. Affected stored result summaries are cleared so they do not continue naming a deleted user. Delivered email, infrastructure logs, and backups are outside the live-database transaction and follow their providers' retention behavior.
 
 New passwords and password resets require matching confirmation and 10–128 characters, including uppercase, lowercase, a number, and a special character. Existing accounts can still sign in with their current passwords.

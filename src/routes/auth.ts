@@ -4,7 +4,6 @@ import type { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { pool } from '../db/pool.js';
-import { parseCookies } from '../lib/cookies.js';
 import { HttpError } from '../lib/http-error.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -15,6 +14,7 @@ import { queueEmail } from '../services/email-outbox.js';
 import { rateLimit } from 'express-rate-limit';
 import { errorFields, logger } from '../lib/logger.js';
 import { deleteAccount } from '../services/delete-account.js';
+import { isNativeClient } from '../lib/client-origins.js';
 
 const credentials = z.object({ email: z.string().email().max(320).transform((v) => v.toLowerCase()), password: z.string().min(10).max(200) });
 const registerSchema = passwordPair.safeExtend({email:credentials.shape.email, displayName: displayNameSchema, acceptTerms:z.literal(true) });
@@ -80,6 +80,11 @@ function setSessionCookie(response: import('express').Response, token: string): 
   });
 }
 
+function sendAuthenticatedUser(request:import('express').Request,response:import('express').Response,token:string,user:{id:number;email:string;displayName:string;role:'player'|'admin'},status=200):void {
+  if(isNativeClient(request)) response.status(status).json({...user,sessionToken:token});
+  else { setSessionCookie(response,token);response.status(status).json(user); }
+}
+
 async function createSession(userId: number): Promise<string> {
   const token = randomBytes(32).toString('base64url');
   const hash = createHash('sha256').update(token).digest();
@@ -98,8 +103,8 @@ authRouter.post('/register', async (request, response) => {
     await queueEmail(connection,{key:`welcome:${result.insertId}`,kind:'welcome',to:body.email,userId:result.insertId,
       subject:"Welcome to Huddle Pick'em!",body:`Hi ${body.displayName},\n\nYour account is ready. Create a group to become its commissioner, or join a group with an invite code.\n\nGet started: ${config.APP_URL}`});
     await connection.commit();
-    setSessionCookie(response, await createSession(result.insertId));
-    response.status(201).json({ id: result.insertId, email: body.email, displayName: body.displayName, role });
+    const token=await createSession(result.insertId);
+    sendAuthenticatedUser(request,response,token,{id:result.insertId,email:body.email,displayName:body.displayName,role},201);
   } catch (error: unknown) {
     await connection.rollback();
     if ((error as { code?: string }).code === 'ER_DUP_ENTRY') throw new HttpError(409, 'An account already exists for that email');
@@ -112,13 +117,13 @@ authRouter.post('/login', async (request, response) => {
   const [rows] = await pool.query<UserRow[]>('SELECT id, email, display_name, password_hash, role FROM users WHERE email = ?', [body.email]);
   const user = rows[0];
   if (!user?.password_hash || !await verifyPassword(body.password, user.password_hash)) throw new HttpError(401, 'Invalid email or password');
-  setSessionCookie(response, await createSession(user.id));
-  response.json({ id: user.id, email: user.email, displayName: user.display_name, role: user.role });
+  const token=await createSession(user.id);
+  sendAuthenticatedUser(request,response,token,{id:user.id,email:user.email,displayName:user.display_name,role:user.role});
 });
 
 authRouter.post('/logout', requireAuth, async (request, response) => {
-  const token = parseCookies(request.header('cookie'))[config.SESSION_COOKIE_NAME];
-  if (token) await pool.execute('DELETE FROM sessions WHERE token_hash = ?', [createHash('sha256').update(token).digest()]);
+  const tokenHash=request.sessionTokenHash;
+  if (tokenHash) await pool.execute('DELETE FROM sessions WHERE token_hash = ?', [tokenHash]);
   response.clearCookie(config.SESSION_COOKIE_NAME, { path: '/' });
   response.status(204).end();
 });

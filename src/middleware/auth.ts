@@ -10,7 +10,9 @@ type SessionRow = RowDataPacket & { user_id: number; role: 'player' | 'admin' };
 
 export const requireAuth: RequestHandler = async (request, _response, next) => {
   try {
-    const token = parseCookies(request.header('cookie'))[config.SESSION_COOKIE_NAME];
+    const authorization=request.header('authorization');
+    const bearer=authorization?.match(/^Bearer ([A-Za-z0-9_-]{43})$/)?.[1];
+    const token = bearer ?? parseCookies(request.header('cookie'))[config.SESSION_COOKIE_NAME];
     if (!token) throw new HttpError(401, 'Authentication required');
     const tokenHash = createHash('sha256').update(token).digest();
     const [rows] = await pool.query<SessionRow[]>(
@@ -21,6 +23,7 @@ export const requireAuth: RequestHandler = async (request, _response, next) => {
     if (!session) throw new HttpError(401, 'Session expired');
     request.userId = session.user_id;
     request.userRole = session.role;
+    request.sessionTokenHash = tokenHash;
     next();
   } catch (error) { next(error); }
 };

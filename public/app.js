@@ -1,4 +1,25 @@
 const $ = (selector) => document.querySelector(selector);
+const runtimeConfig=window.HUDDLE_CONFIG ?? {};
+const apiBaseUrl=String(runtimeConfig.apiBaseUrl ?? '').replace(/\/$/,'');
+const isNativeApp=runtimeConfig.nativeApp===true;
+let nativeSessionToken=null;
+async function initializeNativeSession() {
+  if(!isNativeApp)return;
+  if(!/^https:\/\//.test(apiBaseUrl)) throw new Error('The iOS API address must use HTTPS.');
+  if(!window.HuddleNativeAuth?.getToken) throw new Error('Secure iOS session storage is unavailable.');
+  nativeSessionToken=await window.HuddleNativeAuth.getToken();
+}
+async function storeNativeSession(token) {
+  if(!isNativeApp)return;
+  if(!window.HuddleNativeAuth?.setToken) throw new Error('Secure iOS session storage is unavailable.');
+  await window.HuddleNativeAuth.setToken(token);
+  nativeSessionToken=token;
+}
+async function clearNativeSession() {
+  if(!isNativeApp)return;
+  await window.HuddleNativeAuth?.clearToken?.();
+  nativeSessionToken=null;
+}
 function updateNetworkStatus() {
   const offline = !navigator.onLine;
   $('#network-status').hidden = !offline;
@@ -99,9 +120,13 @@ async function api(path, options = {}) {
   }
   let response;
   try {
-    response = await fetch(path, {
+    const headers={ "content-type": "application/json", ...(options.headers || {}) };
+    if(isNativeApp)headers['x-huddle-client']='ios';
+    if(nativeSessionToken)headers.authorization=`Bearer ${nativeSessionToken}`;
+    response = await fetch(apiBaseUrl+path, {
       ...options,
-      headers: { "content-type": "application/json", ...(options.headers || {}) },
+      credentials:apiBaseUrl?'omit':'same-origin',
+      headers,
     });
   } catch (error) {
     if (!navigator.onLine) throw new Error('You are offline. Reconnect and try again.');
@@ -109,7 +134,12 @@ async function api(path, options = {}) {
   }
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
+  if(response.status===401 && nativeSessionToken)await clearNativeSession();
   if (!response.ok) throw new Error(data.details?.map(issue => issue.message).join(". ") || data.error || "Something went wrong");
+  if(data.sessionToken) {
+    await storeNativeSession(data.sessionToken);
+    delete data.sessionToken;
+  }
   return data;
 }
 const date = (value) =>
@@ -155,12 +185,13 @@ const easternDateTimeInput = (value) => {
 };
 
 async function boot() {
-  if (location.pathname === "/reset-password") {
-    configureAuth();
-    $("#auth").hidden = false;
-    return;
-  }
   try {
+    await initializeNativeSession();
+    if (location.pathname === "/reset-password") {
+      configureAuth();
+      $("#auth").hidden = false;
+      return;
+    }
     me = await api("/api/auth/me");
     if (me) await showDashboard();
     else $("#auth").hidden = false;
@@ -354,6 +385,7 @@ function renderAccount() {
     button.disabled=true;$('#delete-account-message').textContent='Deleting your account...';
     try {
       await api('/api/auth/me',{method:'DELETE',body:JSON.stringify({password:form.elements.password.value,confirmation:form.elements.confirmation.value})});
+      await clearNativeSession();
       localStorage.removeItem('pickem-group-'+me.id);
       location.href='/';
     } catch(error) { $('#delete-account-message').textContent=error.message;button.disabled=false; }
@@ -363,6 +395,7 @@ function renderAccount() {
     $("#logout-error").textContent = "";
     try {
       await api("/api/auth/logout", { method: "POST" });
+      await clearNativeSession();
       location.reload();
     } catch (error) {
       $("#logout-error").textContent = error.message;
