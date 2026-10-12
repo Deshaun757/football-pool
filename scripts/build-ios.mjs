@@ -24,8 +24,8 @@ await writeFile(
 
 await build({
   absWorkingDir: projectRoot,
-  entryPoints: ['./scripts/ios/native-auth.ts'],
-  outfile: 'ios-web/native-auth.js',
+  entryPoints: [path.join(projectRoot, 'scripts', 'ios', 'native-auth.ts')],
+  outfile: path.join(outputDir, 'native-auth.js'),
   bundle: true,
   format: 'iife',
   platform: 'browser',

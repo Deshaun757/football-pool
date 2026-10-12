@@ -2,6 +2,7 @@ import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { App } from '@capacitor/app';
 import { Share, type ShareOptions } from '@capacitor/share';
 import { PushNotifications } from '@capacitor/push-notifications';
+import { registerPlugin } from '@capacitor/core';
 
 const SESSION_KEY = 'session-token';
 const PUSH_TOKEN_KEY = 'push-token';
@@ -19,7 +20,14 @@ type NativeAppBridge = {
   enablePush(): Promise<'granted'|'denied'>;
   refreshPushRegistration(): Promise<void>;
   clearPushToken(): Promise<void>;
+  printHtml(html: string, jobName: string): Promise<void>;
 };
+
+type HuddlePrintPlugin = {
+  printHtml(options: { html: string; jobName: string }): Promise<{ completed: boolean }>;
+};
+
+const HuddlePrint = registerPlugin<HuddlePrintPlugin>('HuddlePrint');
 
 declare global {
   interface Window {
@@ -70,6 +78,10 @@ window.HuddleNative = {
 
   async clearPushToken() {
     await SecureStorage.removeItem(PUSH_TOKEN_KEY);
+  },
+
+  async printHtml(html, jobName) {
+    await HuddlePrint.printHtml({ html, jobName });
   },
 };
 
