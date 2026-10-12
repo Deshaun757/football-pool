@@ -6,6 +6,7 @@ const publicDirectory = new URL('../public/', import.meta.url);
 const names = [
   'styles.css',
   'app.js',
+  'runtime-config.js',
   'legal.css',
   'support.js',
   'huddle-icon.svg',
@@ -19,7 +20,7 @@ for (const name of await readdir(publicDirectory)) {
   if (!name.endsWith('.html')) continue;
   const path = new URL(name, publicDirectory);
   const original = await readFile(path, 'utf8');
-  const updated = original.replace(/(href|src)="\/(styles\.css|app\.js|legal\.css|support\.js|huddle-icon\.svg|huddle-link-preview\.png|apple-touch-icon\.png)(?:\?v=[^"]*)?"/g,
+  const updated = original.replace(/(href|src)="\/(styles\.css|app\.js|runtime-config\.js|legal\.css|support\.js|huddle-icon\.svg|huddle-link-preview\.png|apple-touch-icon\.png)(?:\?v=[^"]*)?"/g,
     (_match, attribute, asset) => `${attribute}="/${asset}?v=${versions.get(asset)}"`);
   if (updated !== original) await writeFile(path, updated);
 }

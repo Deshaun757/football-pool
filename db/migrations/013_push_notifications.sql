@@ -1,0 +1,41 @@
+CREATE TABLE push_preferences (
+  user_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  reminders BOOLEAN NOT NULL DEFAULT TRUE,
+  review_requests BOOLEAN NOT NULL DEFAULT TRUE,
+  decisions BOOLEAN NOT NULL DEFAULT TRUE,
+  results BOOLEAN NOT NULL DEFAULT TRUE,
+  group_activity BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  CONSTRAINT push_preferences_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE push_devices (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  user_id BIGINT UNSIGNED NOT NULL,
+  platform VARCHAR(20) NOT NULL,
+  device_token VARCHAR(255) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  UNIQUE KEY push_devices_token_unique (device_token),
+  KEY push_devices_user_idx (user_id),
+  CONSTRAINT push_devices_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE push_outbox (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  event_key VARCHAR(191) NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  category VARCHAR(30) NOT NULL,
+  title VARCHAR(150) NOT NULL,
+  body VARCHAR(500) NOT NULL,
+  data JSON NULL,
+  expires_at DATETIME(3) NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  available_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  sent_at DATETIME(3) NULL,
+  cancelled_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY push_event_unique (event_key),
+  KEY push_pending_idx (sent_at,cancelled_at,available_at),
+  CONSTRAINT push_outbox_user_fk FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

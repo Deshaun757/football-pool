@@ -1,4 +1,49 @@
 const $ = (selector) => document.querySelector(selector);
+const runtimeConfig=window.HUDDLE_CONFIG ?? {};
+const apiBaseUrl=String(runtimeConfig.apiBaseUrl ?? '').replace(/\/$/,'');
+const isNativeApp=runtimeConfig.nativeApp===true;
+let nativeSessionToken=null;
+let nativePushToken=null;
+let pendingPushAction=null;
+function inviteCodeFromUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(value, window.location.origin);
+    const code = url.searchParams.get('inviteCode') ?? url.searchParams.get('invite_code') ?? url.searchParams.get('code');
+    return /^[a-f0-9]{32}$/i.test(code ?? '') ? code.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+let pendingInviteCode=inviteCodeFromUrl(window.location.href);
+async function initializeNativeSession() {
+  if(!isNativeApp)return;
+  if(!/^https:\/\//.test(apiBaseUrl)) throw new Error('The iOS API address must use HTTPS.');
+  if(!window.HuddleNativeAuth?.getToken) throw new Error('Secure iOS session storage is unavailable.');
+  nativeSessionToken=await window.HuddleNativeAuth.getToken();
+  nativePushToken=await window.HuddleNative?.getPushToken?.() ?? null;
+  const launchUrl=await window.HuddleNative?.getLaunchUrl?.();
+  pendingInviteCode=inviteCodeFromUrl(launchUrl) ?? pendingInviteCode;
+}
+async function storeNativeSession(token) {
+  if(!isNativeApp)return;
+  if(!window.HuddleNativeAuth?.setToken) throw new Error('Secure iOS session storage is unavailable.');
+  await window.HuddleNativeAuth.setToken(token);
+  nativeSessionToken=token;
+}
+async function clearNativeSession() {
+  if(!isNativeApp)return;
+  await window.HuddleNativeAuth?.clearToken?.();
+  nativeSessionToken=null;
+}
+function updateNetworkStatus() {
+  const offline = !navigator.onLine;
+  $('#network-status').hidden = !offline;
+  document.body.classList.toggle('offline', offline);
+}
+window.addEventListener('online', updateNetworkStatus);
+window.addEventListener('offline', updateNetworkStatus);
+updateNetworkStatus();
 function removeInviteCodeFromUrl() {
   if (!window.history?.replaceState) return;
   const url = new URL(window.location.href);
@@ -18,6 +63,27 @@ function removeInviteCodeFromUrl() {
   }
 }
 removeInviteCodeFromUrl();
+window.addEventListener('huddle:native-url', event => {
+  const code=inviteCodeFromUrl(event.detail?.url);
+  if(!code)return;
+  pendingInviteCode=code;
+  applyPendingInvite();
+});
+window.addEventListener('huddle:native-resume', () => {
+  refreshAfterResume().catch(error => console.error('Could not refresh app data after resume.', error));
+});
+window.addEventListener('huddle:push-registration',event=>{
+  nativePushToken=event.detail?.token ?? null;
+  if(me && nativePushToken)api('/api/push/devices',{method:'POST',body:JSON.stringify({token:nativePushToken})})
+    .then(()=>{if($('#push-status'))$('#push-status').textContent='Push notifications are enabled on this device.';})
+    .catch(error=>{if($('#push-status'))$('#push-status').textContent=error.message;});
+});
+window.addEventListener('huddle:push-error',event=>{if($('#push-status'))$('#push-status').textContent=event.detail?.message ?? 'Push notification registration failed.';});
+window.addEventListener('huddle:push-received',()=>{if(me && activeGroup)loadNotifications().catch(()=>{});});
+window.addEventListener('huddle:push-action',event=>{
+  pendingPushAction=event.detail ?? {};
+  if(me)handlePushAction(pendingPushAction).catch(error=>console.error('Could not open push notification.',error));
+});
 let me = null,
   registerMode = false,
   currentWeek = null;
@@ -89,13 +155,28 @@ async function api(path, options = {}) {
     if (!activeGroup) throw new Error('Choose or join a group first');
     path = '/api/groups/' + activeGroup.id + path.slice(4);
   }
-  const response = await fetch(path, {
-    ...options,
-    headers: { "content-type": "application/json", ...(options.headers || {}) },
-  });
+  let response;
+  try {
+    const headers={ "content-type": "application/json", ...(options.headers || {}) };
+    if(isNativeApp)headers['x-huddle-client']='ios';
+    if(nativeSessionToken)headers.authorization=`Bearer ${nativeSessionToken}`;
+    response = await fetch(apiBaseUrl+path, {
+      ...options,
+      credentials:apiBaseUrl?'omit':'same-origin',
+      headers,
+    });
+  } catch (error) {
+    if (!navigator.onLine) throw new Error('You are offline. Reconnect and try again.');
+    throw error;
+  }
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
+  if(response.status===401 && nativeSessionToken)await clearNativeSession();
   if (!response.ok) throw new Error(data.details?.map(issue => issue.message).join(". ") || data.error || "Something went wrong");
+  if(data.sessionToken) {
+    await storeNativeSession(data.sessionToken);
+    delete data.sessionToken;
+  }
   return data;
 }
 const date = (value) =>
@@ -141,12 +222,13 @@ const easternDateTimeInput = (value) => {
 };
 
 async function boot() {
-  if (location.pathname === "/reset-password") {
-    configureAuth();
-    $("#auth").hidden = false;
-    return;
-  }
   try {
+    await initializeNativeSession();
+    if (location.pathname === "/reset-password") {
+      configureAuth();
+      $("#auth").hidden = false;
+      return;
+    }
     me = await api("/api/auth/me");
     if (me) await showDashboard();
     else $("#auth").hidden = false;
@@ -201,7 +283,7 @@ $('#auth-form').onsubmit = async event => {
     if (registerMode || resetting) {
       body.confirmPassword = $('#confirm-password').value;
       if (body.password !== body.confirmPassword) throw new Error('Passwords do not match');
-      if (body.password.length < 10 || body.password.length > 128 || !/[a-z]/.test(body.password) || !/[A-Z]/.test(body.password) || !/[0-9]/.test(body.password) || !/[^a-zA-Z0-9\s]/.test(body.password)) throw new Error('Use 10�128 characters with uppercase, lowercase, a number, and a special character.');
+      if (body.password.length < 10 || body.password.length > 128 || !/[a-z]/.test(body.password) || !/[A-Z]/.test(body.password) || !/[0-9]/.test(body.password) || !/[^a-zA-Z0-9\s]/.test(body.password)) throw new Error('Use 10–128 characters with uppercase, lowercase, a number, and a special character.');
     }
     if (resetting) {
       if (!resetToken) throw new Error('This reset link is invalid. Request a new one.');
@@ -230,6 +312,7 @@ async function showDashboard() {
   $("#admin-menu-item").hidden = me.role !== "admin";
   setupNavigation();
   renderAccount();
+  if(isNativeApp)window.HuddleNative?.refreshPushRegistration?.().catch(error=>console.error('Could not refresh push registration.',error));
   await loadGroups();
   if (activeGroup) await Promise.all([loadWeeks(), loadPicksBoard(), loadNotifications()]);
   if (!boardRefreshTimer)
@@ -241,7 +324,56 @@ async function showDashboard() {
     }, 15000);
 
   if (canReview()) await loadPickReviews();
-  showView(activeGroup ? "home" : "groups");
+  if (!applyPendingInvite()) {
+    if(pendingPushAction)await handlePushAction(pendingPushAction);
+    else showView(activeGroup ? "home" : "groups");
+  }
+}
+
+async function handlePushAction(data) {
+  pendingPushAction=null;
+  const groupId=Number(data?.groupId);
+  if(groupId && groups.some(group=>group.id===groupId) && activeGroup?.id!==groupId) {
+    localStorage.setItem('pickem-group-'+me.id,String(groupId));
+    await loadGroups();
+  }
+  const category=data?.category;
+  const view=category==='review_requests' && canReview()?'reviews':category==='reminders'?'place-picks':category==='results'?'history':category==='group_activity'?'groups':'notifications';
+  showView(view);
+}
+
+function applyPendingInvite() {
+  if(!pendingInviteCode || !me)return false;
+  const input=$('#join-group-form')?.elements?.inviteCode;
+  if(!input)return false;
+  input.value=pendingInviteCode;
+  showView('groups');
+  $('#group-message').textContent='Invitation ready. Select Join group to continue.';
+  input.focus({preventScroll:true});
+  return true;
+}
+
+let resumeRefreshPromise=null;
+async function refreshAfterResume() {
+  updateNetworkStatus();
+  if(!me || resumeRefreshPromise)return resumeRefreshPromise;
+  resumeRefreshPromise=(async()=>{
+    if(!activeGroup)return loadGroups();
+    const refreshes=[loadNotifications(),loadWeeks()];
+    if(activeView==='home')refreshes.push(loadPicksBoard());
+    if(activeView==='reviews' && canReview())refreshes.push(loadPickReviews());
+    await Promise.all(refreshes);
+  })().finally(()=>{resumeRefreshPromise=null;});
+  return resumeRefreshPromise;
+}
+
+async function shareGroupInvite(group) {
+  const url=`https://huddlepickem.com/?inviteCode=${encodeURIComponent(group.inviteCode)}`;
+  const options={title:`Join ${group.name} on Huddle Pick'em`,text:`Join my ${group.name} pick'em group. Invite code: ${group.inviteCode}`,url};
+  if(window.HuddleNative?.share)return window.HuddleNative.share(options);
+  if(navigator.share)return navigator.share(options);
+  await navigator.clipboard.writeText(`${options.text}\n${url}`);
+  $('#group-message').textContent='Invitation link copied.';
 }
 
 function setupNavigation() {
@@ -312,8 +444,10 @@ function showView(view) {
 }
 
 function renderAccount() {
+  const pushSettings=isNativeApp?`<section class="push-settings" aria-labelledby="push-settings-title"><h2 id="push-settings-title">Push notifications</h2><p>Choose which updates this iPhone can receive.</p><button id="enable-push" type="button">Enable notifications</button><form id="push-preferences-form" hidden><label class="check"><input name="reminders" type="checkbox"> Pick deadline reminders</label><label class="check"><input name="reviewRequests" type="checkbox"> Entries ready for review</label><label class="check"><input name="decisions" type="checkbox"> Pick approvals and rejections</label><label class="check"><input name="results" type="checkbox"> Weekly results</label><label class="check"><input name="groupActivity" type="checkbox"> Group activity</label><button type="submit">Save notification preferences</button></form><p id="push-status" role="status"></p></section>`:'';
   $("#account-card").innerHTML =
-    `<form id="account-profile-form"><label>Display name<input name="displayName" autocomplete="name" minlength="2" maxlength="40" pattern="[A-Za-z0-9 .&'-]+" title="Use 2-40 characters: letters, numbers, spaces, apostrophes, hyphens, periods, and ampersands." required value="${esc(me.displayName)}"></label><button type="submit">Save display name</button><p id="account-message" role="status"></p></form><dl class="account-details"><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl><p><a href="/support.html">Email preferences, support &amp; privacy requests</a></p>`;
+    `<form id="account-profile-form"><label>Display name<input name="displayName" autocomplete="name" minlength="2" maxlength="40" pattern="[A-Za-z0-9 .&'-]+" title="Use 2-40 characters: letters, numbers, spaces, apostrophes, hyphens, periods, and ampersands." required value="${esc(me.displayName)}"></label><button type="submit">Save display name</button><p id="account-message" role="status"></p></form><dl class="account-details"><div><dt>Email</dt><dd>${esc(me.email)}</dd></div><div><dt>Account type</dt><dd>${me.role === "admin" ? "App administrator" : "Player"}</dd></div></dl>${pushSettings}<p><a href="/support.html">Email preferences, support &amp; privacy requests</a></p><section class="danger-zone" aria-labelledby="delete-account-title"><h2 id="delete-account-title">Delete account</h2><p>This permanently deletes your profile, picks, entries, notifications, support requests, and stored email records. Groups with other members will be transferred to another member. Empty groups will be deleted.</p><form id="delete-account-form"><label>Current password<input name="password" type="password" autocomplete="current-password" maxlength="200" required></label><label>Type DELETE to confirm<input name="confirmation" autocomplete="off" autocapitalize="characters" spellcheck="false" pattern="DELETE" required></label><button class="danger-button" type="submit">Permanently delete account</button><p id="delete-account-message" role="status"></p></form></section>`;
+  if(isNativeApp)setupPushSettings();
   $("#account-profile-form").onsubmit = async (event) => {
     event.preventDefault();
     const button = event.target.querySelector("button");
@@ -332,11 +466,30 @@ function renderAccount() {
       button.disabled = false;
     }
   };
+  $("#delete-account-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form=event.currentTarget,button=form.querySelector('button');
+    if(form.elements.confirmation.value!=='DELETE') { $('#delete-account-message').textContent='Type DELETE exactly to continue.';return; }
+    if(!confirm('Permanently delete your Huddle Pick\'em account and associated data? This cannot be undone.'))return;
+    button.disabled=true;$('#delete-account-message').textContent='Deleting your account...';
+    try {
+      await api('/api/auth/me',{method:'DELETE',body:JSON.stringify({password:form.elements.password.value,confirmation:form.elements.confirmation.value})});
+      await window.HuddleNative?.clearPushToken?.();
+      nativePushToken=null;
+      await clearNativeSession();
+      localStorage.removeItem('pickem-group-'+me.id);
+      location.href='/';
+    } catch(error) { $('#delete-account-message').textContent=error.message;button.disabled=false; }
+  };
   $("#menu-logout").onclick = async (event) => {
     event.currentTarget.disabled = true;
     $("#logout-error").textContent = "";
     try {
+      if(nativePushToken)await api('/api/push/devices/unregister',{method:'POST',body:JSON.stringify({token:nativePushToken})}).catch(error=>console.error('Could not unregister push device during logout.',error));
       await api("/api/auth/logout", { method: "POST" });
+      await window.HuddleNative?.clearPushToken?.();
+      nativePushToken=null;
+      await clearNativeSession();
       location.reload();
     } catch (error) {
       $("#logout-error").textContent = error.message;
@@ -377,6 +530,28 @@ function restoreMobilePicksPosition(position) {
       strip.scrollLeft = card.offsetLeft - strip.offsetLeft;
     }
   });
+}
+
+async function setupPushSettings() {
+  const form=$('#push-preferences-form'),status=$('#push-status'),enable=$('#enable-push');
+  try {
+    const result=await api('/api/push/preferences');
+    for(const [name,value] of Object.entries(result.preferences))if(form.elements[name])form.elements[name].checked=!!value;
+    form.hidden=false;
+    status.textContent=result.configured?'Notification delivery is available.':'Preferences can be saved now. Delivery starts after APNs is configured.';
+  } catch(error) {status.textContent=error.message;}
+  enable.onclick=async()=>{
+    enable.disabled=true;status.textContent='Requesting notification permission...';
+    try {const permission=await window.HuddleNative.enablePush();status.textContent=permission==='granted'?'Registering this device...':'Notifications are disabled in iPhone Settings.';}
+    catch(error){status.textContent=error.message;} finally {enable.disabled=false;}
+  };
+  form.onsubmit=async event=>{
+    event.preventDefault();const button=form.querySelector('button');button.disabled=true;
+    try {
+      const preferences=Object.fromEntries(['reminders','reviewRequests','decisions','results','groupActivity'].map(name=>[name,form.elements[name].checked]));
+      await api('/api/push/preferences',{method:'PUT',body:JSON.stringify(preferences)});status.textContent='Notification preferences saved.';
+    } catch(error){status.textContent=error.message;} finally {button.disabled=false;}
+  };
 }
 
 function setMobileBoardView(view) {
@@ -949,8 +1124,16 @@ async function loadGroups() {
   $('#group-settings-form').elements.reviewSubmissionMessage.value = activeGroup?.reviewSubmissionMessage ?? '';
   updateReviewMessageCount();
   $('#group-settings-form').elements.joiningEnabled.checked = !!activeGroup?.joiningEnabled;
-  $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
+  $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label><button type="button" data-share-group="${group.id}">Share invite</button>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
   document.querySelectorAll('[data-group-id]').forEach(button => button.onclick = () => selectGroup(Number(button.dataset.groupId)));
+  document.querySelectorAll('[data-share-group]').forEach(button => button.onclick = async () => {
+    const group=groups.find(item=>item.id===Number(button.dataset.shareGroup));
+    if(!group?.inviteCode)return;
+    button.disabled=true;
+    try { await shareGroupInvite(group); }
+    catch(error) { if(error?.name!=='AbortError')$('#group-message').textContent=error.message; }
+    finally { button.disabled=false; }
+  });
   await loadGroupMembers();
 }
 function selectGroup(id) {
