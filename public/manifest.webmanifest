@@ -1,0 +1,15 @@
+{
+  "name": "Huddle Pick'em",
+  "short_name": "Huddle Pick'em",
+  "description": "Create private football pick'em groups, make weekly picks, and track results.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f0e6",
+  "theme_color": "#154f36",
+  "icons": [
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/huddle-link-preview.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

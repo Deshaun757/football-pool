@@ -1,4 +1,12 @@
 const $ = (selector) => document.querySelector(selector);
+function updateNetworkStatus() {
+  const offline = !navigator.onLine;
+  $('#network-status').hidden = !offline;
+  document.body.classList.toggle('offline', offline);
+}
+window.addEventListener('online', updateNetworkStatus);
+window.addEventListener('offline', updateNetworkStatus);
+updateNetworkStatus();
 function removeInviteCodeFromUrl() {
   if (!window.history?.replaceState) return;
   const url = new URL(window.location.href);
@@ -89,10 +97,16 @@ async function api(path, options = {}) {
     if (!activeGroup) throw new Error('Choose or join a group first');
     path = '/api/groups/' + activeGroup.id + path.slice(4);
   }
-  const response = await fetch(path, {
-    ...options,
-    headers: { "content-type": "application/json", ...(options.headers || {}) },
-  });
+  let response;
+  try {
+    response = await fetch(path, {
+      ...options,
+      headers: { "content-type": "application/json", ...(options.headers || {}) },
+    });
+  } catch (error) {
+    if (!navigator.onLine) throw new Error('You are offline. Reconnect and try again.');
+    throw error;
+  }
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.details?.map(issue => issue.message).join(". ") || data.error || "Something went wrong");
@@ -201,7 +215,7 @@ $('#auth-form').onsubmit = async event => {
     if (registerMode || resetting) {
       body.confirmPassword = $('#confirm-password').value;
       if (body.password !== body.confirmPassword) throw new Error('Passwords do not match');
-      if (body.password.length < 10 || body.password.length > 128 || !/[a-z]/.test(body.password) || !/[A-Z]/.test(body.password) || !/[0-9]/.test(body.password) || !/[^a-zA-Z0-9\s]/.test(body.password)) throw new Error('Use 10�128 characters with uppercase, lowercase, a number, and a special character.');
+      if (body.password.length < 10 || body.password.length > 128 || !/[a-z]/.test(body.password) || !/[A-Z]/.test(body.password) || !/[0-9]/.test(body.password) || !/[^a-zA-Z0-9\s]/.test(body.password)) throw new Error('Use 10–128 characters with uppercase, lowercase, a number, and a special character.');
     }
     if (resetting) {
       if (!resetToken) throw new Error('This reset link is invalid. Request a new one.');

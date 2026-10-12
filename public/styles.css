@@ -16,6 +16,8 @@
 }
 body {
   margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
   background: var(--cream);
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
@@ -24,8 +26,8 @@ body.drawer-open {
   overflow: hidden;
 }
 header {
-  height: 72px;
-  padding: 0 max(5vw, 24px);
+  height: calc(72px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(5vw, 24px) 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -34,6 +36,22 @@ header {
   position: sticky;
   top: 0;
   z-index: 5;
+}
+.network-status {
+  position: fixed;
+  top: env(safe-area-inset-top);
+  left: 50%;
+  z-index: 30;
+  width: min(560px, calc(100% - 32px));
+  padding: 10px 16px;
+  border-radius: 0 0 10px 10px;
+  background: #9b2828;
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  transform: translateX(-50%);
+  box-shadow: 0 5px 18px rgba(16,35,27,.18);
 }
 .menu-toggle {
   position: relative;
@@ -81,7 +99,7 @@ header {
   inset: 0 auto 0 0;
   z-index: 20;
   width: min(330px, 86vw);
-  padding: 30px 22px;
+  padding: calc(30px + env(safe-area-inset-top)) max(22px, env(safe-area-inset-right)) calc(30px + env(safe-area-inset-bottom)) max(22px, env(safe-area-inset-left));
   background: var(--paper);
   box-shadow: 16px 0 40px rgba(7, 19, 14, 0.2);
   transform: translateX(-105%);
@@ -94,7 +112,7 @@ header {
   .menu-toggle { display: none; }
   body.signed-in main { margin-left: 250px; }
   body.signed-in .drawer {
-    inset: 72px auto 0 0;
+    inset: calc(72px + env(safe-area-inset-top)) auto 0 0;
     width: 250px;
     padding: 20px 14px;
     transform: none;
@@ -218,6 +236,7 @@ button:disabled {
 }
 .auth-shell {
   min-height: calc(100vh - 72px);
+  min-height: calc(100dvh - 72px - env(safe-area-inset-top));
   display: grid;
   grid-template-columns: 1.2fr 0.8fr;
   gap: 8vw;
@@ -317,6 +336,7 @@ textarea {
 }
 .page-view {
   min-height: calc(100vh - 72px);
+  min-height: calc(100dvh - 72px - env(safe-area-inset-top));
 }
 .page-heading {
   padding: 55px 6vw 20px;
@@ -976,7 +996,7 @@ textarea {
   }
   .board-tools {
     position: sticky;
-    top: 72px;
+    top: calc(72px + env(safe-area-inset-top));
     z-index: 4;
     align-items: center;
     margin: 0 -4px 10px;
