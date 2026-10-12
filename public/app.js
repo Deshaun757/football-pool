@@ -376,11 +376,28 @@ async function shareGroupInvite(group) {
   $('#group-message').textContent='Invitation link copied.';
 }
 
+async function copyText(value) {
+  if(navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(value); return; }
+    catch { /* Fall through for WebViews without clipboard permission. */ }
+  }
+  const input=document.createElement('textarea');
+  input.value=value;
+  input.readOnly=true;
+  input.style.position='fixed';
+  input.style.opacity='0';
+  document.body.append(input);
+  input.select();
+  const copied=document.execCommand('copy');
+  input.remove();
+  if(!copied)throw new Error('Could not copy the invite code. Press and hold the code to copy it.');
+}
+
 function setupNavigation() {
   const drawer = $("#drawer");
   const backdrop = $("#drawer-backdrop");
   const toggle = $("#menu-toggle");
-  const desktop = window.matchMedia('(min-width: 761px)');
+  const desktop = window.matchMedia('(min-width: 761px) and (min-height: 501px)');
   const closeDrawer = () => {
     drawer.classList.remove("open");
     drawer.setAttribute("aria-hidden", String(!desktop.matches));
@@ -611,27 +628,15 @@ function printCurrentPicksBoard(board) {
       })
       .join("")}<td>${esc(entry.tiebreakerTotal)}</td></tr>`)
     .join("");
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) {
-    alert("Allow pop-ups for Huddle Pick’em, then try printing again.");
-    return;
-  }
-  printWindow.opener = null;
-  printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(board.displayWeek.name)} picks</title><style>
-    @page { size: landscape; margin: 0.35in; }
-    * { box-sizing: border-box; }
-    body { margin: 0; color: #10281d; font-family: Arial, sans-serif; }
-    header { margin-bottom: 14px; }
-    h1 { margin: 0 0 4px; font-size: 22px; }
-    p { margin: 0; color: #52635a; font-size: 11px; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 8px; }
-    th, td { padding: 6px 3px; border: 1px solid #bcc8c0; text-align: center; overflow-wrap: anywhere; }
-    thead th { background: #14583f; color: white; }
-    thead th:first-child, tbody th { width: 105px; text-align: left; }
-    tbody th { background: #eef3ef; }
-    tbody tr:nth-child(even) td { background: #f8faf8; }
-  </style></head><body><header><h1>Huddle Pick’em · ${esc(board.displayWeek.name)}</h1><p>${esc(activeGroup?.name ?? "Current group")} · Full picks board</p></header><table><thead><tr><th>Entry</th>${matchupHeaders}<th>Tiebreaker</th></tr></thead><tbody>${entryRows}</tbody></table><script>window.addEventListener('load',()=>setTimeout(()=>window.print(),100));<\/script></body></html>`);
-  printWindow.document.close();
+  document.querySelector('.print-board-document')?.remove();
+  const printDocument=document.createElement('section');
+  printDocument.className='print-board-document';
+  printDocument.innerHTML=`<header><h1>Huddle Pick’em · ${esc(board.displayWeek.name)}</h1><p>${esc(activeGroup?.name ?? "Current group")} · Full picks board</p></header><table><thead><tr><th>Entry</th>${matchupHeaders}<th>Tiebreaker</th></tr></thead><tbody>${entryRows}</tbody></table>`;
+  document.body.append(printDocument);
+  const cleanup=()=>printDocument.remove();
+  window.addEventListener('afterprint',cleanup,{once:true});
+  requestAnimationFrame(()=>window.print());
+  setTimeout(cleanup,60000);
 }
 
 function renderCurrentPicksLeaderboard(entries) {
@@ -700,7 +705,10 @@ async function loadPicksBoard() {
             .map((game) => {
               const pick = entry.picks[String(game.id)];
               const winner = winnerId(game);
-              const resultClass = winner
+              const tied = game.status === "final" && game.homeScore === game.awayScore;
+              const resultClass = tied
+                ? "tied"
+                : winner
                 ? pick?.selectedTeamId === winner
                   ? "correct"
                   : "incorrect"
@@ -713,10 +721,13 @@ async function loadPicksBoard() {
     const mobileCards = board.games
       .map((game, index) => {
         const winner = winnerId(game);
+        const tied = game.status === "final" && game.homeScore === game.awayScore;
         const playerPicks = board.entries
           .map((entry) => {
             const pick = entry.picks[String(game.id)];
-            const resultClass = winner
+            const resultClass = tied
+              ? "tied"
+              : winner
               ? pick?.selectedTeamId === winner
                 ? "correct"
                 : "incorrect"
@@ -734,7 +745,7 @@ async function loadPicksBoard() {
             ? `${game.awayScore}–${game.homeScore}`
             : "AT";
         const kickoff = `${easternDay(game.kickoffAt).slice(0, 3)} ${easternTime(game.kickoffAt)} ET`;
-        return `<article class="mobile-pick-card" data-game-count="${index + 1} of ${board.games.length}"><div class="mobile-matchup"><div>${game.awayLogoUrl ? `<img src="${esc(game.awayLogoUrl)}" alt="">` : ""}<strong>${esc(game.awayAbbreviation)}</strong></div><span><b>${score}</b><small>${game.status === "final" ? "Final" : kickoff}</small></span><div>${game.homeLogoUrl ? `<img src="${esc(game.homeLogoUrl)}" alt="">` : ""}<strong>${esc(game.homeAbbreviation)}</strong></div></div><ul>${playerPicks}</ul><p class="mobile-swipe-hint">Swipe for next matchup →</p></article>`;
+        return `<article class="mobile-pick-card" data-game-count="${index + 1} of ${board.games.length}"><div class="mobile-matchup"><div>${game.awayLogoUrl ? `<img src="${esc(game.awayLogoUrl)}" alt="">` : ""}<strong>${esc(game.awayAbbreviation)}</strong></div><span><b>${score}</b><small>${game.status === "final" ? tied ? "Final · Tie" : "Final" : kickoff}</small></span><div>${game.homeLogoUrl ? `<img src="${esc(game.homeLogoUrl)}" alt="">` : ""}<strong>${esc(game.homeAbbreviation)}</strong></div></div><ul>${playerPicks}</ul><p class="mobile-swipe-hint">Swipe for next matchup →</p></article>`;
       })
       .join("");
     // Capture immediately before replacing the board so scrolling that happens
@@ -1132,8 +1143,20 @@ async function loadGroups() {
   $('#group-settings-form').elements.reviewSubmissionMessage.value = activeGroup?.reviewSubmissionMessage ?? '';
   updateReviewMessageCount();
   $('#group-settings-form').elements.joiningEnabled.checked = !!activeGroup?.joiningEnabled;
-  $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label><button type="button" data-share-group="${group.id}">Share invite</button>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
+  $('#group-list').innerHTML = groups.length ? groups.map(group => `<article class="panel"><h2>${esc(group.name)}</h2><p>${group.memberCount} members · ${group.role === 'commissioner' ? 'You are commissioner' : group.role === 'member' ? 'Member' : 'Administrator access'}</p><p>Commissioner: ${esc(group.commissionerName ?? 'Not assigned')}</p>${group.inviteCode ? `<div class="invite-code-row"><label>Share this invite code<input readonly value="${esc(group.inviteCode)}" aria-label="Invite code for ${esc(group.name)}"></label><button type="button" data-copy-invite="${group.id}">Copy</button></div><button type="button" data-share-group="${group.id}">Share invite</button>` : ''}<button type="button" data-group-id="${group.id}">Open group</button></article>`).join('') : '<p>Create your first group or ask a commissioner for an invite code.</p>';
   document.querySelectorAll('[data-group-id]').forEach(button => button.onclick = () => selectGroup(Number(button.dataset.groupId)));
+  document.querySelectorAll('[data-copy-invite]').forEach(button => button.onclick = async () => {
+    const group=groups.find(item=>item.id===Number(button.dataset.copyInvite));
+    if(!group?.inviteCode)return;
+    button.disabled=true;
+    try {
+      await copyText(group.inviteCode);
+      button.textContent='Copied';
+      $('#group-message').textContent='Invite code copied.';
+      setTimeout(()=>{if(button.isConnected)button.textContent='Copy';},2000);
+    } catch(error) { $('#group-message').textContent=error.message; }
+    finally { button.disabled=false; }
+  });
   document.querySelectorAll('[data-share-group]').forEach(button => button.onclick = async () => {
     const group=groups.find(item=>item.id===Number(button.dataset.shareGroup));
     if(!group?.inviteCode)return;
