@@ -5,6 +5,14 @@ import { pool } from './pool.js';
 
 const CURRENT_LABEL = 'Apple Review Current';
 const HISTORY_LABEL = 'Apple Review History';
+const DEMO_PLAYERS = [
+  { name: 'Alex Carter', email: 'apple-review.alex@example.invalid', tiebreaker: 41 },
+  { name: 'Jordan Blake', email: 'apple-review.jordan@example.invalid', tiebreaker: 44 },
+  { name: 'Taylor Morgan', email: 'apple-review.taylor@example.invalid', tiebreaker: 47 },
+  { name: 'Casey Brooks', email: 'apple-review.casey@example.invalid', tiebreaker: 50 },
+  { name: 'Riley Parker', email: 'apple-review.riley@example.invalid', tiebreaker: 53 },
+  { name: 'Cameron Reed', email: 'apple-review.cameron@example.invalid', tiebreaker: 56 },
+] as const;
 
 type UserRow = RowDataPacket & { id: number; email: string; display_name: string; password_hash: string | null };
 type GroupRow = RowDataPacket & { id: number; name: string; commissioner_role: string; member_role: string };
@@ -19,6 +27,28 @@ type GameRow = RowDataPacket & {
 };
 type EntryRow = RowDataPacket & { id: number; entry_number: number };
 type ScoreRow = RowDataPacket & { entry_id: number; tiebreaker_total: number; correct_picks: number };
+
+async function ensureDemoPlayers(db: PoolConnection, groupId: number): Promise<Array<{ id: number; tiebreaker: number }>> {
+  const players: Array<{ id: number; tiebreaker: number }> = [];
+  for (const player of DEMO_PLAYERS) {
+    await db.execute(
+      `INSERT INTO users (email,display_name,password_hash,role,reminder_emails,result_emails)
+       VALUES (?,?,NULL,'player',FALSE,FALSE)
+       ON DUPLICATE KEY UPDATE display_name=VALUES(display_name),password_hash=NULL,role='player',
+       reminder_emails=FALSE,result_emails=FALSE`,
+      [player.email, player.name],
+    );
+    const [users] = await db.query<(RowDataPacket & { id: number })[]>('SELECT id FROM users WHERE email=? FOR UPDATE', [player.email]);
+    const userId = Number(users[0]!.id);
+    await db.execute(
+      `INSERT INTO group_members (group_id,user_id,role) VALUES (?,?,'member')
+       ON DUPLICATE KEY UPDATE role='member'`,
+      [groupId, userId],
+    );
+    players.push({ id: userId, tiebreaker: player.tiebreaker });
+  }
+  return players;
+}
 
 function requiredEmail(value: string | undefined, name: string): string {
   if (!value) throw new Error(`${name} must be set before running this command`);
@@ -147,6 +177,7 @@ async function setup() {
        max_entries_per_member=GREATEST(max_entries_per_member,2) WHERE id=?`,
       [group.id],
     );
+    const demoPlayers = await ensureDemoPlayers(db, group.id);
 
     const [openWeeks] = await db.query<WeekRow[]>(
       `SELECT w.id,w.name FROM weeks w
@@ -171,6 +202,17 @@ async function setup() {
     });
     await replacePicks(db, commissionerCurrentId, openGames, index => index % 2 === 0);
     await replacePicks(db, memberCurrentId, openGames, index => index % 2 !== 0);
+    for (const [playerIndex, player] of demoPlayers.entries()) {
+      const entryId = await ensureEntry(db, {
+        userId: player.id,
+        weekId: openWeek.id,
+        groupId: group.id,
+        label: CURRENT_LABEL,
+        status: 'submitted',
+        tiebreaker: player.tiebreaker,
+      });
+      await replacePicks(db, entryId, openGames, gameIndex => (gameIndex + playerIndex) % 3 !== 0);
+    }
     await db.execute(
       `INSERT INTO notifications (user_id,entry_id,type,message)
        VALUES (?,?,'pick_review_requested',?)
@@ -211,6 +253,17 @@ async function setup() {
         const game = finalGames[index]!;
         return Number(game.home_score) < Number(game.away_score);
       });
+      for (const [playerIndex, player] of demoPlayers.entries()) {
+        const historyEntryId = await ensureEntry(db, {
+          userId: player.id,
+          weekId: finalWeek.id,
+          groupId: group.id,
+          label: HISTORY_LABEL,
+          status: 'submitted',
+          tiebreaker: Math.max(0, Math.min(200, actualTotal + playerIndex - 2)),
+        });
+        await replacePicks(db, historyEntryId, finalGames, gameIndex => (gameIndex + playerIndex) % 4 !== 0);
+      }
       winnerCount = await scoreReviewGroup(db, finalWeek.id, group.id);
     }
 
@@ -218,6 +271,7 @@ async function setup() {
     console.log(JSON.stringify({
       message: 'App Review sample data is ready',
       group: { id: group.id, name: group.name },
+      demoPlayers: demoPlayers.length,
       currentWeek: openWeek.name,
       pendingReviewEntryId: memberCurrentId,
       completedWeek: finalWeek?.name ?? null,
